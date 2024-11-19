@@ -10,8 +10,7 @@ import numpy as np
 import plotly.graph_objs as go
 
 # %% [markdown]
-# ## 1.自定义功能函数
-
+# ## 1.自定义功能函数   
 # %%
 def _thread_insert2db(table: pymongo.collection, df: pd.DataFrame) -> None:
     # 丢弃DF索引后插入数据库
