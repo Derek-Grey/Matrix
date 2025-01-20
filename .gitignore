@@ -1,0 +1,94 @@
+*/csv
+csv_folder/
+*.csv
+
+*/__pycache__/
+Matrix/Daily/__pycache__/
+D:/Derek/Code/Matrix/Matrix/Daily/__pycache__/
+output/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*$__pycache__
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+
+*$__pycache__
+*.__pycache__
+*$.pyc
+*.csv
+
+# Virtual Environment
+venv/
+ENV/
+.env
+
+.conda/
+conda/
+
+# IDE
+.idea/
+.vscode/
+.pyc/
+*.swp
+*.swo
+.project
+.pydevproject
+.settings/
+
+*.csv
+
+# Project specific
+analysis_results/
+results/
+*.png
+*.pdf
+*.html
+*.csv
+*.json
+*.log
+*.pkl
+
+
+
+# Database
+*.db
+*.sqlite3
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Configuration files
+config.ini
+settings.json
+credentials.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak 

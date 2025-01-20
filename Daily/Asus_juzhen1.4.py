@@ -16,6 +16,16 @@ pd.set_option('future.no_silent_downcasting', True)
 # 数据处理类
 # 定义对齐矩阵的函数
 def align_and_fill_matrix(target_matrix: pd.DataFrame, reference_matrix: pd.DataFrame) -> pd.DataFrame:
+    """
+    将目标矩阵与参考矩阵的列对齐，并用0填充缺失值
+    
+    Args:
+        target_matrix: 需要对齐的目标矩阵
+        reference_matrix: 作为参考的矩阵
+        
+    Returns:
+        aligned_matrix: 对齐后的矩阵
+    """
     try:
         # 重新索引目标矩阵，确保列与参考矩阵一致，缺失值填充为0
         aligned_matrix = target_matrix.reindex(columns=reference_matrix.columns, fill_value=0)
@@ -251,44 +261,167 @@ class LoadData:
 
 # %% 
 # 回测类
-# 固定持仓策略
-def run_backtest(stocks_matrix, limit_matrix, risk_warning_matrix, trade_status_matrix, score_matrix, 
-                 hold_count, rebalance_frequency, strategy_name):
-    start_time = time.time()
+class Backtest:
+    """
+    股票回测策略类，支持固定持仓和动态持仓两种策略
     
-    # 创建输出目录（如果不存在）
-    output_dir = 'output'
-    os.makedirs(output_dir, exist_ok=True)
+    Attributes:
+        stocks_matrix: 股票收益率矩阵
+        limit_matrix: 涨跌停限制矩阵
+        risk_warning_matrix: 风险警示矩阵
+        trade_status_matrix: 交易状态矩阵
+        score_matrix: 股票评分矩阵
+        output_dir: 输出目录
+    """
     
-    # 生成有效性矩阵
-    risk_warning_validity = (risk_warning_matrix == 0).astype(int)
-    trade_status_validity = (trade_status_matrix == 1).astype(int)
-    limit_validity = (limit_matrix == 0).astype(int)
-    valid_stocks_matrix = risk_warning_validity * trade_status_validity * limit_validity
-    restricted_stocks_matrix = trade_status_validity * limit_validity
+    def __init__(self, stocks_matrix, limit_matrix, risk_warning_matrix, 
+                 trade_status_matrix, score_matrix, output_dir='output'):
+        """
+        初始化回测类
+        
+        Args:
+            stocks_matrix: 股票收益率矩阵
+            limit_matrix: 涨跌停限制矩阵
+            risk_warning_matrix: 风险警示矩阵
+            trade_status_matrix: 交易状态矩阵
+            score_matrix: 股票评分矩阵
+            output_dir: 输出目录路径
+        """
+        self.stocks_matrix = stocks_matrix
+        self.limit_matrix = limit_matrix
+        self.risk_warning_matrix = risk_warning_matrix
+        self.trade_status_matrix = trade_status_matrix
+        self.score_matrix = score_matrix
+        self.output_dir = output_dir
+        
+        # 创建输出目录
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # 生成有效性矩阵
+        self._generate_validity_matrices()
+        self.plotter = StrategyPlotter(output_dir)  # 创建绘图器实例
+    
+    def _generate_validity_matrices(self):
+        """生成有效性矩阵和受限股票矩阵"""
+        # 生成有效性矩阵：股票必须同时满足三个条件
+        # 1. 不在风险警示板 (risk_warning_matrix == 0)
+        # 2. 正常交易状态 (trade_status_matrix == 1)
+        # 3. 不是涨跌停状态 (limit_matrix == 0)
+        self.risk_warning_validity = (self.risk_warning_matrix == 0).astype(int)
+        self.trade_status_validity = (self.trade_status_matrix == 1).astype(int)
+        self.limit_validity = (self.limit_matrix == 0).astype(int)
+        self.valid_stocks_matrix = (self.risk_warning_validity * 
+                                  self.trade_status_validity * 
+                                  self.limit_validity)
+        # 受限股票矩阵：只考虑交易状态和涨跌停限制
+        self.restricted_stocks_matrix = (self.trade_status_validity * self.limit_validity)
+    
+    def run_fixed_strategy(self, hold_count, rebalance_frequency, strategy_name="fixed"):
+        """
+        运行固定持仓策略
+        
+        Args:
+            hold_count: 持仓数量
+            rebalance_frequency: 再平衡频率（天数）
+            strategy_name: 策略名称
+            
+        Returns:
+            results: 包含回测结果的DataFrame
+        """
+        start_time = time.time()
+        
+        # 创建 DataFrame 保存持仓股票和收益率
+        position_history = pd.DataFrame(
+            index=self.stocks_matrix.index, 
+            columns=["hold_positions", "daily_return", "strategy"]
+        )
+        position_history["strategy"] = strategy_name
 
-    # 创建 DataFrame 保存持仓股票和收益率
-    position_history = pd.DataFrame(index=stocks_matrix.index, columns=["hold_positions", "daily_return", "strategy"])
-    position_history["strategy"] = strategy_name
-
-    for day in range(1, len(stocks_matrix)):
+        # 执行回测循环
+        for day in range(1, len(self.stocks_matrix)):
+            self._update_positions_fixed(position_history, day, hold_count, rebalance_frequency)
+        
+        # 处理结果
+        results = self._process_results(position_history, strategy_name, start_time)
+        return results
+    
+    def run_dynamic_strategy(self, hold_count, rebalance_frequency, start_sorted=100, 
+                           the_end_month=None, fixed_by_month=True):
+        """
+        运行动态持仓策略
+        
+        Args:
+            hold_count: 基础持仓数量
+            rebalance_frequency: 再平衡频率（天数）
+            start_sorted: 起始排序位置
+            the_end_month: 结束月份
+            fixed_by_month: 是否按月固定持仓数量
+            
+        Returns:
+            results: 包含回测结果的DataFrame
+        """
+        start_time = time.time()
+        
+        # 计算动态持仓参数
+        df_dynamic = self._calculate_dynamic_parameters(
+            hold_count, start_sorted, the_end_month, fixed_by_month
+        )
+        
+        # 计算每日的持仓数量和开始位置
+        daily_hold_nums = df_dynamic['hold_num'].reindex(
+            self.stocks_matrix.index, method='ffill'
+        ).fillna(hold_count).astype(int)
+        
+        daily_hold_starts = df_dynamic['hold_s'].reindex(
+            self.stocks_matrix.index, method='ffill'
+        ).fillna(start_sorted).astype(int)
+        
+        # 创建 DataFrame 保存持仓股票和收益率
+        position_history = pd.DataFrame(
+            index=self.stocks_matrix.index,
+            columns=["hold_positions", "daily_return", "strategy"]
+        )
+        position_history["strategy"] = "dynamic"
+        
+        # 执行回测循环
+        for day in range(1, len(self.stocks_matrix)):
+            self._update_positions_dynamic(
+                position_history, day, rebalance_frequency,
+                daily_hold_nums[position_history.index[day]],
+                daily_hold_starts[position_history.index[day]]
+            )
+        
+        # 处理结果
+        results = self._process_results(position_history, "dynamic", start_time)
+        return results
+    
+    def _update_positions_fixed(self, position_history, day, hold_count, rebalance_frequency):
+        """
+        更新固定持仓策略的持仓
+        
+        Args:
+            position_history: 持仓历史DataFrame
+            day: 当前交易日索引
+            hold_count: 持仓数量
+            rebalance_frequency: 再平衡频率
+        """
         previous_positions = position_history.iloc[day - 1]["hold_positions"]
         current_date = position_history.index[day]
         
         # 如果评分矩阵的前一天数据全为NaN，保持前一天的持仓
-        if score_matrix.iloc[day - 1].isna().all():
+        if self.score_matrix.iloc[day - 1].isna().all():
             position_history.loc[current_date, "hold_positions"] = previous_positions
-            continue
+            return
 
         # 解析前一天的持仓
         previous_positions = set() if pd.isna(previous_positions) else set(previous_positions.split(','))
         previous_positions = {stock for stock in previous_positions if isinstance(stock, str) and stock.isalnum()}
 
         # 计算有效股票和受限股票
-        valid_stocks = valid_stocks_matrix.iloc[day].astype(bool)
-        restricted = restricted_stocks_matrix.iloc[day].astype(bool)
+        valid_stocks = self.valid_stocks_matrix.iloc[day].astype(bool)
+        restricted = self.restricted_stocks_matrix.iloc[day].astype(bool)
         previous_date = position_history.index[day - 1]
-        valid_scores = score_matrix.loc[previous_date]
+        valid_scores = self.score_matrix.loc[previous_date]
         
         # 受限股票
         restricted_stocks = [stock for stock in previous_positions if not restricted[stock]]
@@ -317,8 +450,8 @@ def run_backtest(stocks_matrix, limit_matrix, risk_warning_matrix, trade_status_
         position_history.loc[current_date, "hold_positions"] = ','.join(final_positions)
 
         # 计算每日收益率
-        if previous_date in stocks_matrix.index:
-            daily_returns = stocks_matrix.loc[current_date, list(final_positions)].astype(float)
+        if previous_date in self.stocks_matrix.index:
+            daily_returns = self.stocks_matrix.loc[current_date, list(final_positions)].astype(float)
             daily_return = daily_returns.mean()
             position_history.loc[current_date, "daily_return"] = daily_return
 
@@ -328,128 +461,43 @@ def run_backtest(stocks_matrix, limit_matrix, risk_warning_matrix, trade_status_
         turnover_rate = len(previous_positions_set - current_positions_set) / max(len(previous_positions_set), 1)
         position_history.at[current_date, "turnover_rate"] = turnover_rate
 
-    # 删除没有持仓记录的行
-    position_history = position_history.dropna(subset=["hold_positions"])
-
-    # 计算持仓数量
-    position_history['hold_count'] = position_history['hold_positions'].apply(
-        lambda x: len(x.split(',')) if pd.notna(x) else 0
-    )
-    
-    # 保存结果
-    results = position_history[['hold_positions', 'hold_count', 'turnover_rate', 'daily_return']]
-    results.index.name = 'date'
-    
-    csv_file = os.path.join(output_dir, f'strategy_results_{strategy_name}.csv')
-    results.to_csv(csv_file)
-    
-    # 计算统计指标
-    cumulative_return = (1 + results['daily_return']).cumprod().iloc[-1] - 1
-    avg_daily_return = results['daily_return'].mean()
-    avg_turnover = results['turnover_rate'].mean()
-    avg_holdings = results['hold_count'].mean()
-    
-    # 输出统计信息
-    logger.info(f"\n=== 固定持仓策略统计 ===")
-    logger.info(f"累计收益率: {cumulative_return:.2%}")
-    logger.info(f"平均日收益率: {avg_daily_return:.2%}")
-    logger.info(f"平均换手率: {avg_turnover:.2%}")
-    logger.info(f"平均持仓量: {avg_holdings:.1f}")
-    logger.info(f"结果已保存到: {csv_file}")
-    logger.info(f"策略运行耗时: {time.time() - start_time:.2f} 秒")
-    
-    return results
-
-# %% 
-# 动态持仓策略
-def run_backtest_dynamic(stocks_matrix, limit_matrix, risk_warning_matrix, trade_status_matrix, score_matrix, 
-                        hold_count, rebalance_frequency, start_sorted=100, the_end_month=None, fixed_by_month=True):
-    start_time = time.time()
-    
-    # 创建输出目录（如果不存在）
-    output_dir = 'output'
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # 计算每月的股票数量
-    monthly_counts = stocks_matrix.resample('ME').apply(lambda x: x.notna().sum())
-    if isinstance(monthly_counts, pd.Series):
-        df_dynamic = pd.DataFrame({'count': monthly_counts})
-    else:
-        df_dynamic = pd.DataFrame({'count': monthly_counts.sum(axis=1)})
-    
-    # 计算结束月份的股票数量
-    if the_end_month is None:
-        the_end_count = df_dynamic.iloc[-1]['count']
-    else:
-        the_end_count = df_dynamic.loc[the_end_month]['count']
-    
-    # 计算持仓开始和结束位置
-    df_dynamic['hold_s'] = (df_dynamic['count'] * (start_sorted / the_end_count)).fillna(start_sorted).apply(lambda x: math.floor(x))
-    df_dynamic['hold_e'] = (df_dynamic['count'] * ((start_sorted + hold_count) / the_end_count)).fillna(start_sorted + hold_count).apply(lambda x: math.floor(x))
-    df_dynamic['hold_num'] = (df_dynamic.hold_e - df_dynamic.hold_s).fillna(hold_count)
-    df_dynamic['num_pre'] = df_dynamic.hold_num.shift(-1)
-    
-    # 向前填充数据
-    df_dynamic = df_dynamic.ffill().infer_objects(copy=False)
-    
-    # 确保持仓数量不超过下一个月全部的数量
-    df_dynamic['hold_num'] = df_dynamic.apply(
-        lambda dx: dx.hold_num if dx.hold_num <= dx.num_pre else dx.num_pre, 
-        axis=1
-    ).astype(int)
-    
-    # 如果指定了结束月份，调整持仓策略
-    if the_end_month is not None:
-        df_dynamic.loc[the_end_month:, 'hold_s'] = start_sorted
-        if fixed_by_month:
-            df_dynamic.loc[the_end_month:, 'hold_num'] = hold_count
-    
-    # 计算每日的持仓数量和开始位置
-    daily_hold_nums = df_dynamic['hold_num'].reindex(stocks_matrix.index, method='ffill').fillna(hold_count).astype(int)
-    daily_hold_starts = df_dynamic['hold_s'].reindex(stocks_matrix.index, method='ffill').fillna(start_sorted).astype(int)
-
-    # 生成有效性矩阵
-    risk_warning_validity = (risk_warning_matrix == 0).astype(int)
-    trade_status_validity = (trade_status_matrix == 1).astype(int)
-    limit_validity = (limit_matrix == 0).astype(int)
-    valid_stocks_matrix = risk_warning_validity * trade_status_validity * limit_validity
-    restricted_stocks_matrix = trade_status_validity * limit_validity
-
-    # 创建 DataFrame 保存持仓股票和收益率
-    position_history = pd.DataFrame(index=stocks_matrix.index, 
-                                  columns=["hold_positions", "daily_return", "turnover_rate", "strategy"])
-    position_history["strategy"] = "dynamic_hold"
-
-    for day in range(1, len(stocks_matrix)):
+    def _update_positions_dynamic(self, position_history, day, rebalance_frequency, current_hold_count, current_start_pos):
+        """
+        更新动态持仓策略的持仓
+        
+        Args:
+            position_history: 持仓历史DataFrame
+            day: 当前交易日索引
+            rebalance_frequency: 再平衡频率
+            current_hold_count: 当前持仓数量
+            current_start_pos: 当前起始位置
+        """
         previous_positions = position_history.iloc[day - 1]["hold_positions"]
         current_date = position_history.index[day]
         
-        current_hold_count = daily_hold_nums[current_date]
-        current_start_pos = daily_hold_starts[current_date]
-
         # 如果评分矩阵的前一天数据全为NaN，保持前一天的持仓
-        if score_matrix.iloc[day - 1].isna().all():
+        if self.score_matrix.iloc[day - 1].isna().all():
             position_history.loc[current_date, "hold_positions"] = previous_positions
-            continue
+            return
 
         # 解析前一天的持仓
         previous_positions = set() if pd.isna(previous_positions) else set(previous_positions.split(','))
         previous_positions = {stock for stock in previous_positions if isinstance(stock, str) and stock.isalnum()}
 
         # 计算有效股票和受限股票
-        valid_stocks = valid_stocks_matrix.iloc[day].astype(bool)
-        restricted = restricted_stocks_matrix.iloc[day].astype(bool)
+        valid_stocks = self.valid_stocks_matrix.iloc[day].astype(bool)
+        restricted = self.restricted_stocks_matrix.iloc[day].astype(bool)
         previous_date = position_history.index[day - 1]
-        valid_scores = score_matrix.loc[previous_date]
+        valid_scores = self.score_matrix.loc[previous_date]
         restricted_stocks = [stock for stock in previous_positions if not restricted[stock]]
 
         # 每隔 rebalance_frequency 天重新平衡持仓
         if (day - 1) % rebalance_frequency == 0:
             sorted_stocks = valid_scores.sort_values(ascending=False)
-            start_pos = max(0, int(current_start_pos))
-            hold_num = max(1, int(current_hold_count))
-            
             try:
+                start_pos = max(0, int(current_start_pos))
+                hold_num = max(1, int(current_hold_count))
+                
                 limited_stocks = sorted_stocks.iloc[start_pos:start_pos + hold_num].index
                 retained_stocks = list(set(previous_positions) & set(limited_stocks) | set(restricted_stocks))
 
@@ -462,7 +510,7 @@ def run_backtest_dynamic(stocks_matrix, limit_matrix, risk_warning_matrix, trade
                     final_positions.update(new_stocks[:new_positions_needed])
             except IndexError:
                 logger.warning(f"日期 {current_date}: 可用股票数量不足，使用所有有效股票")
-                final_positions = set(sorted_stocks[valid_stocks].index[:hold_num])
+                final_positions = set(sorted_stocks[valid_stocks].index[:current_hold_count])
         else:
             final_positions = set(previous_positions)
 
@@ -470,8 +518,8 @@ def run_backtest_dynamic(stocks_matrix, limit_matrix, risk_warning_matrix, trade
         position_history.loc[current_date, "hold_positions"] = ','.join(final_positions)
 
         # 计算每日收益率
-        if previous_date in stocks_matrix.index:
-            daily_returns = stocks_matrix.loc[current_date, list(final_positions)].astype(float)
+        if previous_date in self.stocks_matrix.index:
+            daily_returns = self.stocks_matrix.loc[current_date, list(final_positions)].astype(float)
             daily_return = daily_returns.mean()
             position_history.loc[current_date, "daily_return"] = daily_return
 
@@ -481,142 +529,332 @@ def run_backtest_dynamic(stocks_matrix, limit_matrix, risk_warning_matrix, trade
         turnover_rate = len(previous_positions_set - current_positions_set) / max(len(previous_positions_set), 1)
         position_history.at[current_date, "turnover_rate"] = turnover_rate
 
-    # 删除没有持仓记录的行
-    position_history = position_history.dropna(subset=["hold_positions"])
+    def _calculate_dynamic_parameters(self, hold_count, start_sorted, the_end_month, fixed_by_month):
+        """
+        计算动态持仓策略的参数
+        
+        Args:
+            hold_count: 基础持仓数量
+            start_sorted: 起始排序位置
+            the_end_month: 结束月份
+            fixed_by_month: 是否按月固定持仓数量
+            
+        Returns:
+            df_dynamic: 包含动态参数的DataFrame
+        """
+        # 计算每月的股票数量
+        monthly_counts = self.stocks_matrix.resample('ME').apply(lambda x: x.notna().sum())
+        if isinstance(monthly_counts, pd.Series):
+            df_dynamic = pd.DataFrame({'count': monthly_counts})
+        else:
+            df_dynamic = pd.DataFrame({'count': monthly_counts.sum(axis=1)})
+        
+        # 计算结束月份的股票数量
+        if the_end_month is None:
+            the_end_count = df_dynamic.iloc[-1]['count']
+        else:
+            the_end_count = df_dynamic.loc[the_end_month]['count']
+        
+        # 计算持仓开始和结束位置
+        df_dynamic['hold_s'] = (df_dynamic['count'] * (start_sorted / the_end_count)).fillna(start_sorted).apply(lambda x: math.floor(x))
+        df_dynamic['hold_e'] = (df_dynamic['count'] * ((start_sorted + hold_count) / the_end_count)).fillna(start_sorted + hold_count).apply(lambda x: math.floor(x))
+        df_dynamic['hold_num'] = (df_dynamic.hold_e - df_dynamic.hold_s).fillna(hold_count)
+        df_dynamic['num_pre'] = df_dynamic.hold_num.shift(-1)
+        
+        # 向前填充数据
+        df_dynamic = df_dynamic.ffill().infer_objects(copy=False)
+        
+        # 确保持仓数量不超过下一个月全部的数量
+        df_dynamic['hold_num'] = df_dynamic.apply(
+            lambda dx: dx.hold_num if dx.hold_num <= dx.num_pre else dx.num_pre, 
+            axis=1
+        ).astype(int)
+        
+        # 如果指定了结束月份，调整持仓策略
+        if the_end_month is not None:
+            df_dynamic.loc[the_end_month:, 'hold_s'] = start_sorted
+            if fixed_by_month:
+                df_dynamic.loc[the_end_month:, 'hold_num'] = hold_count
+        
+        return df_dynamic
 
-    # 计算持仓数量
-    position_history['hold_count'] = position_history['hold_positions'].apply(
-        lambda x: len(x.split(',')) if pd.notna(x) else 0
-    )
+    def _process_results(self, position_history, strategy_name, start_time):
+        """
+        处理回测结果
+        
+        Args:
+            position_history: 持仓历史DataFrame
+            strategy_name: 策略名称
+            start_time: 开始时间
+            
+        Returns:
+            results: 处理后的结果DataFrame
+        """
+        # 删除没有持仓记录的行
+        position_history = position_history.dropna(subset=["hold_positions"])
+
+        # 计算持仓数量
+        position_history['hold_count'] = position_history['hold_positions'].apply(
+            lambda x: len(x.split(',')) if pd.notna(x) else 0
+        )
+        
+        # 保存结果
+        results = position_history[['hold_positions', 'hold_count', 'turnover_rate', 'daily_return']]
+        results.index.name = 'date'
+        
+        csv_file = os.path.join(self.output_dir, f'strategy_results_{strategy_name}.csv')
+        results.to_csv(csv_file)
+        
+        # 计算统计指标
+        cumulative_return = (1 + results['daily_return']).cumprod().iloc[-1] - 1
+        avg_daily_return = results['daily_return'].mean()
+        avg_turnover = results['turnover_rate'].mean()
+        avg_holdings = results['hold_count'].mean()
+        
+        # 输出统计信息
+        logger.info(f"\n=== {strategy_name}策略统计 ===")
+        logger.info(f"累计收益率: {cumulative_return:.2%}")
+        logger.info(f"平均日收益率: {avg_daily_return:.2%}")
+        logger.info(f"平均换手率: {avg_turnover:.2%}")
+        logger.info(f"平均持仓量: {avg_holdings:.1f}")
+        logger.info(f"结果已保存到: {csv_file}")
+        logger.info(f"策略运行耗时: {time.time() - start_time:.2f} 秒")
+        
+        return results
+
+    def plot_results(self, results, strategy_type, turn_loss=0.003):
+        """
+        绘制策略结果图表
+        
+        Args:
+            results: 回测结果DataFrame
+            strategy_type: 策略类型
+            turn_loss: 换手损失率
+        """
+        self.plotter.plot_net_value(results, strategy_type, turn_loss)
+
+# %% 
+# 绘图类
+class StrategyPlotter:
+    """
+    策略结果可视化类
     
-    # 保存结果
-    results = position_history[['hold_positions', 'hold_count', 'turnover_rate', 'daily_return']]
-    results.index.name = 'date'
+    Attributes:
+        output_dir: 输出图表目录
+    """
     
-    csv_file = os.path.join(output_dir, 'strategy_results_dynamic.csv')
-    results.to_csv(csv_file)
+    def __init__(self, output_dir='output'):
+        """
+        初始化绘图类
+        
+        Args:
+            output_dir: 输出目录路径
+        """
+        self.output_dir = output_dir
+        os.makedirs(self.output_dir, exist_ok=True)
     
-    # 计算统计指标
-    cumulative_return = (1 + results['daily_return']).cumprod().iloc[-1] - 1
-    avg_daily_return = results['daily_return'].mean()
-    avg_turnover = results['turnover_rate'].mean()
-    avg_holdings = results['hold_count'].mean()
+    def plot_net_value(self, df: pd.DataFrame, strategy_name: str, turn_loss: float = 0.003):
+        """
+        绘制策略的累计净值和回撤曲线
+        
+        Args:
+            df: 包含回测结果的DataFrame
+            strategy_name: 策略名称
+            turn_loss: 换手损失率
+        """
+        df = df.copy()  # 创建副本避免修改原始数据
+        df.reset_index(inplace=True)
+        df.set_index('date', inplace=True)
+        start_date = df.index[0]
+        
+        # 确保必要的列存在
+        if 'daily_return' not in df.columns:
+            logger.error("DataFrame 不包含 'daily_return' 列。")
+            return
+        if 'turnover_rate' not in df.columns:
+            logger.error("DataFrame 不包含 'turnover_rate' 列。")
+            return
+
+        # 计算成本和净值
+        self._calculate_costs_and_returns(df, turn_loss)
+        
+        # 计算回撤
+        self._calculate_drawdown(df)
+        
+        # 计算统计指标
+        stats = self._calculate_statistics(df)
+        
+        # 绘制图表
+        self._create_plot(df, strategy_name, start_date, stats)
+        
+        # 保存图表（可选）
+        # self._save_plot(strategy_name)
     
-    # 输出统计信息
-    logger.info("\n=== 动态持仓策略统计 ===")
-    logger.info(f"累计收益率: {cumulative_return:.2%}")
-    logger.info(f"平均日收益率: {avg_daily_return:.2%}")
-    logger.info(f"平均换手率: {avg_turnover:.2%}")
-    logger.info(f"平均持仓数量: {avg_holdings:.1f}")
-    logger.info(f"结果已保存到: {csv_file}")
-    logger.info(f"策略运行耗时: {time.time() - start_time:.2f} 秒")
+    def _calculate_costs_and_returns(self, df: pd.DataFrame, turn_loss: float):
+        """计算成本和收益"""
+        # 设置固定成本，并针对特定日期进行调整
+        df['loss'] = 0.0013  # 初始固定成本
+        df.loc[df.index > '2023-08-31', 'loss'] = 0.0008  # 特定日期后的调整成本
+        df['loss'] += float(turn_loss)  # 加上换手损失
+
+        # 计算调整后的变动和累计净值
+        df['chg_'] = df['daily_return'] - df['turnover_rate'] * df['loss']
+        df['net_value'] = (df['chg_'] + 1).cumprod()
     
-    return results
-
-# 绘制累计净值和回撤曲线的函数
-def _plot_net_value(df: pd.DataFrame, text: str, turn_loss):
-    """绘制累计净值和回撤曲线。"""
-    df.reset_index(inplace=True)
-    df.set_index('date', inplace=True)
-    start_date = df.index[0]
+    def _calculate_drawdown(self, df: pd.DataFrame):
+        """计算最大回撤"""
+        # 计算最大净值和回撤
+        dates = df.index.unique().tolist()
+        for date in dates:
+            df.loc[date, 'max_net'] = df.loc[:date].net_value.max()
+        df['back_net'] = df['net_value'] / df['max_net'] - 1
     
-    # 确保 'daily_return' 列存在
-    if 'daily_return' not in df.columns:
-        logger.error("DataFrame 不包含 'daily_return' 列。")
-        return
-
-    # 设置固定成本，并针对特定日期进行调整
-    df['loss'] = 0.0013  # 初始固定成本
-    df.loc[df.index > '2023-08-31', 'loss'] = 0.0008  # 特定日期后的调整成本
-    df['loss'] += float(turn_loss)  # 加上换手损失
-
-    # 计算调整后的变动和累计净值
-    df['chg_'] = df['daily_return'] - df['turnover_rate'] * df['loss']
-    df['net_value'] = (df['chg_'] + 1).cumprod()
-
-    # 计算最大净值和回撤
-    dates = df.index.unique().tolist()
-    for date in dates:
-        df.loc[date, 'max_net'] = df.loc[:date].net_value.max()
-    df['back_net'] = df['net_value'] / df['max_net'] - 1
-
-    # 计算年化收益和月波动率
-    s_ = df.iloc[-1]
-    ana = format(s_.net_value ** (252 / df.shape[0]) - 1, '.2%')
-    vola = format(df.net_value.pct_change().std() * 21 ** 0.5, '.2%')
-
-    # 创建净值和回撤的plotly图形对象
-    g1 = go.Scatter(x=df.index.unique().tolist(), y=df['net_value'], name='净值')
-    g2 = go.Scatter(x=df.index.unique().tolist(), y=df['back_net'] * 100, name='回撤', xaxis='x', yaxis='y2', mode="none",
-                    fill="tozeroy")
-
-    # 配置并显示图表
-    fig = go.Figure(
-        data=[g1, g2],
-        layout={
-            'height': 1122,
-            "title": f"{text}，<br>净值（左）& 回撤（右），<br>全期：{start_date} ~ {s_.name}，<br>年化收益：{ana}，月波动：{vola}",
-            "font": {"size": 22},
-            "yaxis": {"title": "累计净值"},
-            "yaxis2": {"title": "最大回撤", "side": "right", "overlaying": "y", "ticksuffix": "%", "showgrid": False},
+    def _calculate_statistics(self, df: pd.DataFrame):
+        """计算统计指标"""
+        s_ = df.iloc[-1]
+        return {
+            'annualized_return': format(s_.net_value ** (252 / df.shape[0]) - 1, '.2%'),
+            'monthly_volatility': format(df.net_value.pct_change().std() * 21 ** 0.5, '.2%'),
+            'end_date': s_.name
         }
-    )
-    fig.show()
+    
+    def _create_plot(self, df: pd.DataFrame, strategy_name: str, start_date, stats: dict):
+        """创建图表"""
+        # 创建净值和回撤的plotly图形对象
+        g1 = go.Scatter(x=df.index.unique().tolist(), y=df['net_value'], name='净值')
+        g2 = go.Scatter(x=df.index.unique().tolist(), y=df['back_net'] * 100, name='回撤', xaxis='x', yaxis='y2', mode="none",
+                        fill="tozeroy")
+
+        # 配置并显示图表
+        fig = go.Figure(
+            data=[g1, g2],
+            layout={
+                'height': 1122,
+                "title": f"{strategy_name}策略，<br>净值（左）& 回撤（右），<br>全期：{start_date} ~ {stats['end_date']}，<br>年化收益：{stats['annualized_return']}，月波动：{stats['monthly_volatility']}",
+                "font": {"size": 22},
+                "yaxis": {"title": "累计净值"},
+                "yaxis2": {"title": "最大回撤", "side": "right", "overlaying": "y", "ticksuffix": "%", "showgrid": False},
+            }
+        )
+        fig.show()
+    
+    def _save_plot(self, strategy_name: str):
+        """保存图表到文件（如果需要）"""
+        # TODO: 实现图表保存功能
+        pass
 
 # %% 
 # 主函数
-def main():
-    # 初始化参数
-    start_date = "2010-08-02"
-    end_date = "2020-07-31"
-    data_directory = 'data'
-    hold_count = 50
-    rebalance_frequency = 1
-
-    # 数据加载
-    data_loader = LoadData(start_date, end_date, data_directory)
-    aligned_stocks_matrix, aligned_limit_matrix, aligned_riskwarning_matrix, aligned_trade_status_matrix, score_matrix = process_data(data_loader)
-
-    # 运行固定持仓回测
-    fixed_results = run_backtest(
-        aligned_stocks_matrix, aligned_limit_matrix, aligned_riskwarning_matrix, 
-        aligned_trade_status_matrix, score_matrix, hold_count, rebalance_frequency, "fixed"
-    )
+def main(start_date="2010-08-02", end_date="2020-07-31", 
+         hold_count=50, rebalance_frequency=1,
+         data_directory='data', output_directory='output',
+         run_fixed=True, run_dynamic=True):
+    """
+    主函数，执行回测策略
     
-    # 运行动态持仓回测
-    dynamic_results = run_backtest_dynamic(
-        aligned_stocks_matrix, aligned_limit_matrix, aligned_riskwarning_matrix, 
-        aligned_trade_status_matrix, score_matrix, hold_count, rebalance_frequency
-    )
+    Args:
+        start_date: 回测开始日期，格式："YYYY-MM-DD"
+        end_date: 回测结束日期，格式："YYYY-MM-DD"
+        hold_count: 持仓数量，默认50只股票
+        rebalance_frequency: 再平衡频率（天数），默认每天再平衡
+        data_directory: 数据目录，存放原始数据和中间数据
+        output_directory: 输出目录，存放回测结果和图表
+        run_fixed: 是否运行固定持仓策略，默认True
+        run_dynamic: 是否运行动态持仓策略，默认True
+        
+    Returns:
+        tuple: (fixed_results, dynamic_results) 包含固定持仓和动态持仓的回测结果
+    """
+    try:
+        # 记录回测开始信息
+        logger.info(f"开始回测 - 时间范围: {start_date} 至 {end_date}")
+        
+        # 第一步：数据准备
+        logger.info("加载数据...")
+        data_loader = LoadData(start_date, end_date, data_directory)  # 初始化数据加载器
+        matrices = process_data(data_loader)  # 处理数据，返回所需的矩阵
+        
+        # 第二步：初始化回测实例
+        backtest = Backtest(*matrices, output_dir=output_directory)  # 创建回测对象
+        
+        # 用于存储回测结果的字典
+        results = {}
+        
+        # 第三步：执行固定持仓策略回测
+        if run_fixed:
+            logger.info("运行固定持仓策略...")
+            try:
+                # 运行固定持仓回测
+                fixed_results = backtest.run_fixed_strategy(
+                    hold_count=hold_count,  # 固定持仓数量
+                    rebalance_frequency=rebalance_frequency,  # 再平衡频率
+                    strategy_name="fixed"  # 策略名称
+                )
+                # 绘制回测结果图表
+                backtest.plot_results(fixed_results, "固定持仓")
+                results['fixed'] = fixed_results
+                logger.info("固定持仓策略完成")
+            except Exception as e:
+                logger.error(f"固定持仓策略执行失败: {e}")
+                results['fixed'] = None
+        
+        # 第四步：执行动态持仓策略回测
+        if run_dynamic:
+            logger.info("运行动态持仓策略...")
+            try:
+                # 运行动态持仓回测
+                dynamic_results = backtest.run_dynamic_strategy(
+                    hold_count=hold_count,  # 基础持仓数量
+                    rebalance_frequency=rebalance_frequency,  # 再平衡频率
+                    start_sorted=100  # 排序起始位置
+                )
+                # 绘制回测结果图表
+                backtest.plot_results(dynamic_results, "动态持仓")
+                results['dynamic'] = dynamic_results
+                logger.info("动态持仓策略完成")
+            except Exception as e:
+                logger.error(f"动态持仓策略执行失败: {e}")
+                results['dynamic'] = None
+        
+        logger.info("回测完成")
+        return results.get('fixed'), results.get('dynamic')
     
-    # 确保每个结果 DataFrame 包含 'strategy' 列
-    fixed_results['strategy'] = 'fixed'
-    dynamic_results['strategy'] = 'dynamic'
-
-    # 合并结果
-    all_position_history = pd.concat([fixed_results, dynamic_results])
-    
-    # 计算累计收益率
-    all_position_history['cumulative_return'] = (1 + all_position_history['daily_return']).cumprod() - 1
-    
-    # 按策略分组计算统计指标
-    strategy_stats = all_position_history.groupby('strategy').agg({
-        'daily_return': ['mean', 'std', 'count'],
-        'turnover_rate': 'mean',
-        'cumulative_return': 'last'
-    })
-    
-    # 输出结果
-    print("\n=== 回测结果统计 ===")
-    print(strategy_stats)
-    
-    # 绘制净值曲线图
-    _plot_net_value(fixed_results, "固定持仓策略净值曲线", 0.003)
-    _plot_net_value(dynamic_results, "动态持仓策略净值曲线", 0.003)
-    
-    return fixed_results, dynamic_results
+    except Exception as e:
+        logger.error(f"回测执行失败: {e}")
+        raise
 
 if __name__ == "__main__":
-    fixed_results, dynamic_results = main()
+    # 设置回测参数
+    params = {
+        'start_date': "2010-08-02",    # 回测起始日期
+        'end_date': "2020-07-31",      # 回测结束日期
+        'hold_count': 50,              # 持仓数量
+        'rebalance_frequency': 1,      # 每天再平衡
+        'data_directory': 'data',      # 数据目录
+        'output_directory': 'output',  # 输出目录
+        'run_fixed': True,             # 运行固定持仓策略
+        'run_dynamic': True            # 运行动态持仓策略
+    }
+    
+    # 执行回测
+    try:
+        # 运行主函数，获取回测结果
+        fixed_results, dynamic_results = main(**params)
+        
+        # 输出回测结果摘要
+        if fixed_results is not None:
+            logger.info("\n=== 固定持仓策略结果摘要 ===")
+            # 计算累计收益率
+            cumulative_return = (1 + fixed_results['daily_return']).cumprod().iloc[-1] - 1
+            logger.info(f"累计收益率: {cumulative_return:.2%}")
+            
+        if dynamic_results is not None:
+            logger.info("\n=== 动态持仓策略结果摘要 ===")
+            # 计算累计收益率
+            cumulative_return = (1 + dynamic_results['daily_return']).cumprod().iloc[-1] - 1
+            logger.info(f"累计收益率: {cumulative_return:.2%}")
+            
+    except Exception as e:
+        logger.error(f"程序执行失败: {e}")
 
 # %%
