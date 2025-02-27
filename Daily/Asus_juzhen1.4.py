@@ -450,7 +450,7 @@ class Backtest:
         position_history.loc[current_date, "hold_positions"] = ','.join(final_positions)
 
         # 计算每日收益率
-        if previous_date in self.stocks_matrix.index:
+        if previous_date in self.stocks_matrix.index: 
             daily_returns = self.stocks_matrix.loc[current_date, list(final_positions)].astype(float)
             daily_return = daily_returns.mean()
             position_history.loc[current_date, "daily_return"] = daily_return

@@ -1,4 +1,3 @@
-
 # 导入所需的库
 import os
 import time
@@ -76,58 +75,70 @@ class Backtest:
         """
         start_time = time.time()
         
-        # 创建 DataFrame 保存持仓股票和收益率
+        # 创建持仓矩阵，使用与stocks_matrix相同的索引和列
+        position_matrix = pd.DataFrame(0, 
+                                     index=self.stocks_matrix.index,
+                                     columns=self.stocks_matrix.columns)
+        
+        # 创建DataFrame保存收益率等信息
         position_history = pd.DataFrame(
-            index=self.stocks_matrix.index, 
-            columns=["hold_positions", "daily_return", "strategy"]
+            index=self.stocks_matrix.index,
+            columns=["daily_return", "turnover_rate", "strategy"]
         )
         position_history["strategy"] = strategy_name
 
         # 执行回测循环
         for day in range(1, len(self.stocks_matrix)):
-            self._update_positions_fixed(position_history, day, hold_count, rebalance_frequency)
+            self._update_positions_fixed_matrix(
+                position_matrix, position_history, 
+                day, hold_count, rebalance_frequency
+            )
         
         # 处理结果
-        results = self._process_results(position_history, strategy_name, start_time)
+        results = self._process_results_matrix(
+            position_matrix, position_history, 
+            strategy_name, start_time
+        )
         return results
 
-    def _update_positions_fixed(self, position_history, day, hold_count, rebalance_frequency):
+    def _update_positions_fixed_matrix(self, position_matrix, position_history, 
+                                     day, hold_count, rebalance_frequency):
         """
-        更新固定持仓策略的持仓
+        更新固定持仓策略的持仓（矩阵版本）
         
         Args:
+            position_matrix: 持仓矩阵
             position_history: 持仓历史DataFrame
             day: 当前交易日索引
             hold_count: 持仓数量
             rebalance_frequency: 再平衡频率
         """
-        previous_positions = position_history.iloc[day - 1]["hold_positions"]
-        current_date = position_history.index[day]
+        current_date = position_matrix.index[day]
+        previous_date = position_matrix.index[day - 1]
         
         # 如果评分矩阵的前一天数据全为NaN，保持前一天的持仓
         if self.score_matrix.iloc[day - 1].isna().all():
-            position_history.loc[current_date, "hold_positions"] = previous_positions
+            position_matrix.iloc[day] = position_matrix.iloc[day - 1]
             return
 
-        # 解析前一天的持仓
-        previous_positions = set() if pd.isna(previous_positions) else set(previous_positions.split(','))
-        previous_positions = {stock for stock in previous_positions if isinstance(stock, str) and stock.isalnum()}
+        # 获取前一天的持仓
+        previous_positions = position_matrix.iloc[day - 1]
+        previous_holdings = previous_positions[previous_positions == 1].index.tolist()
 
         # 计算有效股票和受限股票
         valid_stocks = self.valid_stocks_matrix.iloc[day].astype(bool)
         restricted = self.restricted_stocks_matrix.iloc[day].astype(bool)
-        previous_date = position_history.index[day - 1]
         valid_scores = self.score_matrix.loc[previous_date]
         
         # 受限股票
-        restricted_stocks = [stock for stock in previous_positions if not restricted[stock]]
+        restricted_stocks = [stock for stock in previous_holdings if not restricted[stock]]
 
         # 每隔 rebalance_frequency 天重新平衡持仓
         if (day - 1) % rebalance_frequency == 0:
             sorted_stocks = valid_scores.sort_values(ascending=False)
             try:
                 top_stocks = sorted_stocks.iloc[:hold_count].index
-                retained_stocks = list(set(previous_positions) & set(top_stocks) | set(restricted_stocks))
+                retained_stocks = list(set(previous_holdings) & set(top_stocks) | set(restricted_stocks))
 
                 new_positions_needed = hold_count - len(retained_stocks)
                 final_positions = set(retained_stocks)
@@ -140,7 +151,7 @@ class Backtest:
                 logger.warning(f"日期 {current_date}: 可用股票数量不足，使用所有有效股票")
                 final_positions = set(sorted_stocks[valid_stocks].index[:hold_count])
         else:
-            final_positions = set(previous_positions)
+            final_positions = set(previous_holdings)
 
         # 更新持仓
         position_history.loc[current_date, "hold_positions"] = ','.join(final_positions)
