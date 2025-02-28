@@ -10,7 +10,7 @@ from loguru import logger
 from utils import trans_str_to_float64, get_client_U
 import plotly.graph_objects as go
 from pathlib import Path
-from functools import reduce, wraps
+from functools import reduce
 import multiprocessing as mp
 from settings import USELESS_INDUS, DB_U_MINUTE, END_MONTH
 from Utils.utils import trans_str_to_float64
@@ -20,27 +20,16 @@ from Utils.my_errors import LogExceptions
 from datetime import datetime
 from functools import wraps
 
+
 # 设置项目根目录
 ROOT_DIR = Path(__file__).parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 from db_client import get_client
 from load_data import LoadData
+
 # 设置选择加入未来行为的选项
 pd.set_option('future.no_silent_downcasting', True)
-
-# 定义缓存装饰器
-def cache_data(func):
-    cache = None  # 用于存储缓存数据
-
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        nonlocal cache
-        if cache is None:  # 如果缓存为空，则调用原始函数
-            cache = func(self, *args, **kwargs)
-        return cache  # 返回缓存数据
-
-    return wrapper
 
 # %% 
 # 数据处理类
@@ -65,7 +54,6 @@ def align_and_fill_matrix(target_matrix: pd.DataFrame, reference_matrix: pd.Data
         raise
 
 # 文件检查和时间范围的确认函数
-@cache_data  # 应用缓存装饰器
 def process_data(data_loader):
     try:
         # 获取开始和结束日期
@@ -101,56 +89,38 @@ def process_data(data_loader):
                     logger.debug('设定日期范围在原始文件日期范围内，加载对齐数据...')
                     
                     # 加载对齐文件
+                    aligned_stocks_matrix = pd.read_csv(
+                        os.path.join(data_loader.data_folder, 'aligned_stocks_matrix.csv'), 
+                        index_col=0, parse_dates=True
+                    )
                     aligned_limit_matrix = pd.read_csv(
                         os.path.join(data_loader.data_folder, 'aligned_limit_matrix.csv'), 
                         index_col=0, parse_dates=True
                     )
-                    
-                    # 验证 aligned_limit_matrix 的时间范围
-                    aligned_start_date = aligned_limit_matrix.index.min()
-                    aligned_end_date = aligned_limit_matrix.index.max()
-                    if aligned_start_date <= start_date and aligned_end_date >= end_date:
-                        logger.debug('aligned_limit_matrix 的时间范围符合预设，加载对齐数据...')
-                        
-                        # 尝试加载其他对齐文件
-                        try:
-                            aligned_stocks_matrix = pd.read_csv(
-                                os.path.join(data_loader.data_folder, 'aligned_stocks_matrix.csv'), 
-                                index_col=0, parse_dates=True
-                            )
-                            aligned_riskwarning_matrix = pd.read_csv(
-                                os.path.join(data_loader.data_folder, 'aligned_riskwarning_matrix.csv'), 
-                                index_col=0, parse_dates=True
-                            )
-                            aligned_trade_status_matrix = pd.read_csv(
-                                os.path.join(data_loader.data_folder, 'aligned_trade_status_matrix.csv'), 
-                                index_col=0, parse_dates=True
-                            )
-                            score_matrix = pd.read_csv(
-                                os.path.join(data_loader.data_folder, 'aligned_score_matrix.csv'), 
-                                index_col=0, parse_dates=True
-                            )
-                            
-                            # 截取所需日期范围的数据
-                            date_mask = lambda df: (df.index >= start_date) & (df.index <= end_date)
-                            aligned_stocks_matrix = aligned_stocks_matrix[date_mask(aligned_stocks_matrix)]
-                            aligned_limit_matrix = aligned_limit_matrix[date_mask(aligned_limit_matrix)]
-                            aligned_riskwarning_matrix = aligned_riskwarning_matrix[date_mask(aligned_riskwarning_matrix)]
-                            aligned_trade_status_matrix = aligned_trade_status_matrix[date_mask(aligned_trade_status_matrix)]
-                            score_matrix = score_matrix[date_mask(score_matrix)]
+                    aligned_riskwarning_matrix = pd.read_csv(
+                        os.path.join(data_loader.data_folder, 'aligned_riskwarning_matrix.csv'), 
+                        index_col=0, parse_dates=True
+                    )
+                    aligned_trade_status_matrix = pd.read_csv(
+                        os.path.join(data_loader.data_folder, 'aligned_trade_status_matrix.csv'), 
+                        index_col=0, parse_dates=True
+                    )
+                    score_matrix = pd.read_csv(
+                        os.path.join(data_loader.data_folder, 'aligned_score_matrix.csv'), 
+                        index_col=0, parse_dates=True
+                    )
 
-                            return (aligned_stocks_matrix, aligned_limit_matrix,
-                                    aligned_riskwarning_matrix, aligned_trade_status_matrix,
-                                    score_matrix)
+                    # 截取所需日期范围的数据
+                    date_mask = lambda df: (df.index >= start_date) & (df.index <= end_date)
+                    aligned_stocks_matrix = aligned_stocks_matrix[date_mask(aligned_stocks_matrix)]
+                    aligned_limit_matrix = aligned_limit_matrix[date_mask(aligned_limit_matrix)]
+                    aligned_riskwarning_matrix = aligned_riskwarning_matrix[date_mask(aligned_riskwarning_matrix)]
+                    aligned_trade_status_matrix = aligned_trade_status_matrix[date_mask(aligned_trade_status_matrix)]
+                    score_matrix = score_matrix[date_mask(score_matrix)]
 
-                        except Exception as e:
-                            logger.warning(f"加载其他对齐数据失败: {e}")
-                            logger.debug("将重新生成对齐数据...")
-
-                    else:
-                        logger.warning('aligned_limit_matrix 的时间范围不符合预设')
-                else:
-                    logger.warning('设定日期范围不在原始文件日期范围内')
+                    return (aligned_stocks_matrix, aligned_limit_matrix,
+                           aligned_riskwarning_matrix, aligned_trade_status_matrix,
+                           score_matrix)
 
             except Exception as e:
                 logger.warning(f"加载现有对齐数据失败: {e}")
@@ -229,7 +199,6 @@ class LoadData:
             raise
 
     # 获取股票信息
-    @cache_data  # 应用缓存装饰器
     def get_stocks_info(self) -> tuple:
         try:
             logger.debug('从数据库加载股票信息...')
@@ -442,28 +411,88 @@ class Backtest:
         # 受限股票矩阵：只考虑交易状态和涨跌停限制
         self.restricted_stocks_matrix = (self.trade_status_validity * self.limit_validity)
     
-    def _update_positions(self, position_history, day, hold_count, rebalance_frequency, strategy_type, current_start_pos=None):
+    def run_fixed_strategy(self, hold_count, rebalance_frequency, strategy_name="fixed"):
         """
-        更新持仓策略的持仓
+        运行固定持仓策略
+        
+        Args:
+            hold_count: 持仓数量
+            rebalance_frequency: 再平衡频率（天数）
+            strategy_name: 策略名称
+            
+        Returns:
+            results: 包含回测结果的DataFrame
+        """
+        start_time = time.time()
+        
+        # 创建 DataFrame 保存持仓股票和收益率
+        position_history = pd.DataFrame(
+            index=self.stocks_matrix.index, 
+            columns=["hold_positions", "daily_return", "strategy"]
+        )
+        position_history["strategy"] = strategy_name
+
+        # 执行回测循环
+        for day in range(1, len(self.stocks_matrix)):
+            self._update_positions_fixed(position_history, day, hold_count, rebalance_frequency)
+        
+        # 处理结果
+        results = self._process_results(position_history, strategy_name, start_time)
+        return results
+    
+    def run_dynamic_strategy(self, rebalance_frequency, df_mv, start_sorted=100, the_end_month=None, fixed_by_month=True):
+        """
+        运行动态持仓策略
+        
+        Args:
+            rebalance_frequency: 再平衡频率（天数）
+            df_mv: 包含每月持仓数量的 DataFrame
+            start_sorted: 起始排序位置
+            the_end_month: 结束月份
+            fixed_by_month: 是否按月固定持仓数量
+            
+        Returns:
+            results: 包含回测结果的 DataFrame
+        """
+        start_time = time.time()
+        
+        # 创建 DataFrame 保存持仓股票和收益率
+        position_history = pd.DataFrame(
+            index=self.stocks_matrix.index,
+            columns=["hold_positions", "daily_return", "strategy"]
+        )
+        position_history["strategy"] = "dynamic"
+        
+        # 执行回测循环
+        for day in range(1, len(self.stocks_matrix)):
+            current_date = position_history.index[day].strftime('%Y-%m-%d')
+            # current_month = current_date.strftime('%Y-%m')
+            current_hold_count = df_mv.loc[current_date, 'hold_num'] if current_date in df_mv.index else 50
+            current_hold_count = int(current_hold_count)
+            
+            self._update_positions_dynamic(
+                position_history, day, rebalance_frequency,
+                current_hold_count,
+                start_sorted
+            )
+        
+        # 处理结果
+        results = self._process_results(position_history, "dynamic", start_time)
+        return results
+    
+    def _update_positions_fixed(self, position_history, day, hold_count, rebalance_frequency):
+        """
+        更新固定持仓策略的持仓
         
         Args:
             position_history: 持仓历史DataFrame
             day: 当前交易日索引
             hold_count: 持仓数量
             rebalance_frequency: 再平衡频率
-            strategy_type: 策略类型（固定或动态）
-            current_start_pos: 当前持仓起始位置（仅用于动态策略）
         """
-        previous_positions = position_history.iloc[day - 1]["hold_positions"]  # 获取前一天的持仓
-        current_date = position_history.index[day]  # 当前交易日的日期
+        previous_positions = position_history.iloc[day - 1]["hold_positions"]
+        current_date = position_history.index[day]
         
-        # 初始化当前持仓数量，默认为传入的 hold_count
-        current_hold_count = hold_count  
-
-        # 如果策略为动态策略，根据当前天数更新当前持仓数量
-        if strategy_type == "dynamic":
-            current_hold_count = max(1, int(current_hold_count))  # 确保持仓数量至少为1
-
         # 如果评分矩阵的前一天数据全为NaN，保持前一天的持仓
         if self.score_matrix.iloc[day - 1].isna().all():
             position_history.loc[current_date, "hold_positions"] = previous_positions
@@ -478,7 +507,7 @@ class Backtest:
         restricted = self.restricted_stocks_matrix.iloc[day].astype(bool)
         previous_date = position_history.index[day - 1]
         valid_scores = self.score_matrix.loc[previous_date]
-
+        
         # 受限股票
         restricted_stocks = [stock for stock in previous_positions if not restricted[stock]]
 
@@ -486,14 +515,9 @@ class Backtest:
         if (day - 1) % rebalance_frequency == 0:
             sorted_stocks = valid_scores.sort_values(ascending=False)
             try:
-                if strategy_type == "fixed":
-                    top_stocks = sorted_stocks.iloc[:hold_count]  # 固定策略选择前 hold_count 只股票
-                else:  # dynamic
-                    start_pos = max(0, int(current_start_pos))
-                    hold_num = max(1, int(current_hold_count))
-                    top_stocks = sorted_stocks.iloc[start_pos:start_pos + hold_num]  # 动态策略选择相应数量的股票
-
+                top_stocks = sorted_stocks.iloc[:hold_count].index
                 retained_stocks = list(set(previous_positions) & set(top_stocks) | set(restricted_stocks))
+
                 new_positions_needed = hold_count - len(retained_stocks)
                 final_positions = set(retained_stocks)
 
@@ -522,50 +546,122 @@ class Backtest:
         turnover_rate = len(previous_positions_set - current_positions_set) / max(len(previous_positions_set), 1)
         position_history.at[current_date, "turnover_rate"] = turnover_rate
 
-    def run_fixed_strategy(self, hold_count, rebalance_frequency, strategy_name="fixed"):
+    def _update_positions_dynamic(self, position_history, day, rebalance_frequency, current_hold_count, current_start_pos):
         """
-        运行固定持仓策略
-        """
-        start_time = time.time()
-        position_history = self._initialize_position_history(strategy_name)
-
-        # 执行回测循环
-        for day in range(1, len(self.stocks_matrix)):
-            self._update_positions(position_history, day, hold_count, rebalance_frequency, "fixed")
+        更新动态持仓策略的持仓
         
-        results = self._process_results(position_history, strategy_name, start_time)
-        return results
-
-    def run_dynamic_strategy(self, rebalance_frequency, df_mv, start_sorted=100, the_end_month=None, fixed_by_month=True):
+        Args:
+            position_history: 持仓历史DataFrame
+            day: 当前交易日索引
+            rebalance_frequency: 再平衡频率
+            current_hold_count: 当前持仓数量
+            current_start_pos: 当前起始位置
         """
-        运行动态持仓策略
-        """
-        start_time = time.time()
-        position_history = self._initialize_position_history("dynamic")
+        previous_positions = position_history.iloc[day - 1]["hold_positions"]
+        current_date = position_history.index[day]
+        
+        # 如果评分矩阵的前一天数据全为NaN，保持前一天的持仓
+        if self.score_matrix.iloc[day - 1].isna().all():
+            position_history.loc[current_date, "hold_positions"] = previous_positions
+            return
 
-        # 执行回测循环
-        for day in range(1, len(self.stocks_matrix)):
-            current_date = position_history.index[day].strftime('%Y-%m-%d')
-            # 确保 current_hold_count 被定义
-            current_hold_count = df_mv.loc[current_date, 'hold_num'] if current_date in df_mv.index else 50
-            current_hold_count = int(current_hold_count)
+        # 解析前一天的持仓
+        previous_positions = set() if pd.isna(previous_positions) else set(previous_positions.split(','))
+        previous_positions = {stock for stock in previous_positions if isinstance(stock, str) and stock.isalnum()}
+
+        # 计算有效股票和受限股票
+        valid_stocks = self.valid_stocks_matrix.iloc[day].astype(bool)
+        restricted = self.restricted_stocks_matrix.iloc[day].astype(bool)
+        previous_date = position_history.index[day - 1]
+        valid_scores = self.score_matrix.loc[previous_date]
+        restricted_stocks = [stock for stock in previous_positions if not restricted[stock]]
+
+        # 每隔 rebalance_frequency 天重新平衡持仓
+        if (day - 1) % rebalance_frequency == 0:
+            sorted_stocks = valid_scores.sort_values(ascending=False)
+            try:
+                start_pos = max(0, int(current_start_pos))
+                hold_num = max(1, int(current_hold_count))
+                
+                limited_stocks = sorted_stocks.iloc[start_pos:start_pos + hold_num].index
+                retained_stocks = list(set(previous_positions) & set(limited_stocks) | set(restricted_stocks))
+
+                new_positions_needed = hold_num - len(retained_stocks)
+                final_positions = set(retained_stocks)
+
+                if new_positions_needed > 0:
+                    new_stocks = sorted_stocks[valid_stocks].iloc[start_pos:].index
+                    new_stocks = [stock for stock in new_stocks if stock not in final_positions]
+                    final_positions.update(new_stocks[:new_positions_needed])
+            except IndexError:
+                logger.warning(f"日期 {current_date}: 可用股票数量不足，使用所有有效股票")
+                final_positions = set(sorted_stocks[valid_stocks].index[:current_hold_count])
+        else:
+            final_positions = set(previous_positions)
+
+        # 更新持仓
+        position_history.loc[current_date, "hold_positions"] = ','.join(final_positions)
+
+        # 计算每日收益率
+        if previous_date in self.stocks_matrix.index:
+            daily_returns = self.stocks_matrix.loc[current_date, list(final_positions)].astype(float)
+            daily_return = daily_returns.mean()
+            position_history.loc[current_date, "daily_return"] = daily_return
+
+        # 计算换手率
+        previous_positions_set = previous_positions
+        current_positions_set = final_positions
+        turnover_rate = len(previous_positions_set - current_positions_set) / max(len(previous_positions_set), 1)
+        position_history.at[current_date, "turnover_rate"] = turnover_rate
+
+    def _calculate_dynamic_parameters(self, hold_count, start_sorted, the_end_month, fixed_by_month):
+        """
+        计算动态持仓策略的参数
+        
+        Args:
+            hold_count: 基础持仓数量
+            start_sorted: 起始排序位置
+            the_end_month: 结束月份
+            fixed_by_month: 是否按月固定持仓数量
             
-            # 将 current_hold_count 传递给 _update_positions
-            self._update_positions(position_history, day, current_hold_count, rebalance_frequency, "dynamic", start_sorted)
+        Returns:
+            df_dynamic: 包含动态参数的DataFrame
+        """
+        # 计算每月的股票数量
+        monthly_counts = self.stocks_matrix.resample('ME').apply(lambda x: x.notna().sum())
+        if isinstance(monthly_counts, pd.Series):
+            df_dynamic = pd.DataFrame({'count': monthly_counts})
+        else:
+            df_dynamic = pd.DataFrame({'count': monthly_counts.sum(axis=1)})
         
-        results = self._process_results(position_history, "dynamic", start_time)
-        return results
-
-    def _initialize_position_history(self, strategy_name):
-        """
-        初始化持仓历史DataFrame
-        """
-        position_history = pd.DataFrame(
-            index=self.stocks_matrix.index, 
-            columns=["hold_positions", "daily_return", "strategy"]
-        )
-        position_history["strategy"] = strategy_name
-        return position_history
+        # 计算结束月份的股票数量
+        if the_end_month is None:
+            the_end_count = df_dynamic.iloc[-1]['count']
+        else:
+            the_end_count = df_dynamic.loc[the_end_month]['count']
+        
+        # 计算持仓开始和结束位置
+        df_dynamic['hold_s'] = (df_dynamic['count'] * (start_sorted / the_end_count)).fillna(start_sorted).apply(lambda x: math.floor(x))
+        df_dynamic['hold_e'] = (df_dynamic['count'] * ((start_sorted + hold_count) / the_end_count)).fillna(start_sorted + hold_count).apply(lambda x: math.floor(x))
+        df_dynamic['hold_num'] = (df_dynamic.hold_e - df_dynamic.hold_s).fillna(hold_count)
+        df_dynamic['num_pre'] = df_dynamic.hold_num.shift(-1)
+        
+        # 向前填充数据
+        df_dynamic = df_dynamic.ffill().infer_objects(copy=False)
+        
+        # 确保持仓数量不超过下一个月全部的数量
+        df_dynamic['hold_num'] = df_dynamic.apply(
+            lambda dx: dx.hold_num if dx.hold_num <= dx.num_pre else dx.num_pre, 
+            axis=1
+        ).astype(int)
+        
+        # 如果指定了结束月份，调整持仓策略
+        if the_end_month is not None:
+            df_dynamic.loc[the_end_month:, 'hold_s'] = start_sorted
+            if fixed_by_month:
+                df_dynamic.loc[the_end_month:, 'hold_num'] = hold_count
+        
+        return df_dynamic
 
     def _process_results(self, position_history, strategy_name, start_time):
         """
@@ -733,63 +829,6 @@ class StrategyPlotter:
         pass
 
 # %% 
-# 添加保存结果的方法
-def save_results(results, strategy_name, output_directory):
-    """
-    保存回测结果到CSV文件
-    
-    Args:
-        results: 包含回测结果的DataFrame
-        strategy_name: 策略名称
-        output_directory: 输出目录
-    """
-    if results is not None:
-        results.to_csv(os.path.join(output_directory, f'{strategy_name}_results.csv'))
-        logger.info(f"{strategy_name}结果已保存到 {strategy_name}_results.csv")
-
-# %% 
-# 添加运行策略的方法
-def run_strategy(backtest, strategy_name, hold_count, rebalance_frequency, df_mv=None):
-    """
-    运行回测策略并保存结果
-    
-    Args:
-        backtest: Backtest 实例
-        strategy_name: 策略名称
-        hold_count: 固定持仓数量（动态策略时不使用）
-        rebalance_frequency: 再平衡频率（天数）
-        df_mv: 包含每月持仓数量的 DataFrame（仅用于动态策略）
-        
-    Returns:
-        results: 包含回测结果的DataFrame
-    """
-    logger.info(f"运行{strategy_name}策略...")
-    try:
-        if strategy_name == "fixed":
-            results = backtest.run_fixed_strategy(
-                hold_count=hold_count,
-                rebalance_frequency=rebalance_frequency,
-                strategy_name=strategy_name
-            )
-        elif strategy_name == "dynamic":
-            # 从 df_mv 中获取当前日期的持仓数量
-            current_date = backtest.stocks_matrix.index[-1].strftime('%Y-%m-%d')
-            current_hold_count = df_mv.loc[current_date, 'hold_num'] if current_date in df_mv.index else 50
-            
-            results = backtest.run_dynamic_strategy(
-                rebalance_frequency=rebalance_frequency,
-                df_mv=df_mv,
-                start_sorted=current_hold_count  # 使用从 df_mv 中获取的持仓数量
-            )
-        backtest.plot_results(results, strategy_name)
-        save_results(results, strategy_name, backtest.output_dir)
-        logger.info(f"{strategy_name}策略完成")
-        return results
-    except Exception as e:
-        logger.error(f"{strategy_name}策略执行失败: {e}")
-        return None
-
-# %% 
 # 主函数
 def main(start_date="2010-08-02", end_date="2020-07-31", 
          hold_count=50, rebalance_frequency=1,
@@ -827,12 +866,45 @@ def main(start_date="2010-08-02", end_date="2020-07-31",
         
         # 第三步：执行固定持仓策略回测
         if run_fixed:
-            results['fixed'] = run_strategy(backtest, "fixed", hold_count, rebalance_frequency)
+            logger.info("运行固定持仓策略...")
+            try:
+                fixed_results = backtest.run_fixed_strategy(
+                    hold_count=hold_count,  # 固定持仓数量
+                    rebalance_frequency=rebalance_frequency,  # 再平衡频率
+                    strategy_name="fixed"  # 策略名称
+                )
+                backtest.plot_results(fixed_results, "固定持仓")
+                results['fixed'] = fixed_results
+                logger.info("固定持仓策略完成")
+                
+                # 保存固定持仓结果
+                fixed_results.to_csv(os.path.join(output_directory, 'fixed_results.csv'))
+                logger.info("固定持仓结果已保存到 fixed_results.csv")
+                
+            except Exception as e:
+                logger.error(f"固定持仓策略执行失败: {e}")
+                results['fixed'] = None
         
         # 第四步：执行动态持仓策略回测
         if run_dynamic:
-            df_mv = data_loader.get_hold_num_per()
-            results['dynamic'] = run_strategy(backtest, "dynamic", hold_count, rebalance_frequency, df_mv)
+            logger.info("运行动态持仓策略...")
+            try:
+                df_mv = data_loader.get_hold_num_per()
+                dynamic_results = backtest.run_dynamic_strategy(
+                    rebalance_frequency=rebalance_frequency,
+                    df_mv=df_mv
+                )
+                backtest.plot_results(dynamic_results, "动态持仓")
+                results['dynamic'] = dynamic_results
+                logger.info("动态持仓策略完成")
+                
+                # 保存动态持仓结果
+                dynamic_results.to_csv(os.path.join(output_directory, 'dynamic_results.csv'))
+                logger.info("动态持仓结果已保存到 dynamic_results.csv")
+                
+            except Exception as e:
+                logger.error(f"动态持仓策略执行失败: {e}")
+                results['dynamic'] = None
         
         logger.info("回测完成")
         
