@@ -137,78 +137,46 @@ def mp_minute_chg_info(y1=2009, y2=2024, time_='15:00:00'):
 # 装饰器工厂函数，接受csv文件名作为参数
 
 def data_loader_decorator(csv_filename, suffix=None):
+    """CSV数据加载装饰器"""
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
-            # 分割文件名和后缀
             file_name, file_extension = os.path.splitext(csv_filename)
-
-            # 如果suffix存在，将其加在文件名和后缀之间
-            if suffix:
-                decorator_filename = f"{file_name}_{suffix}{file_extension}"
-            else:
-                decorator_filename = csv_filename
-
-            csv_folder = getattr(self, 'csv_folder', None)
-            if csv_folder and os.path.isdir(csv_folder):
-                csv_file_path = os.path.join(csv_folder, decorator_filename)
-
-                if os.path.exists(csv_file_path):
-                    try:
-                        df_csv = pd.read_csv(csv_file_path, index_col=[0, 1])
-                        # df_csv = pd.read_csv(csv_file_path)
-                        # index_columns = [col for col in ['code', 'date', 'month'] if col in df_csv.columns]
-                        # if index_columns:
-                        #     df_csv.set_index(index_columns, inplace=True)
-                        
-                        # 检查索引列并删除名为0或None的列
-                        # if df_csv.index.names[0] in [0, None]:
-                        #     df_csv = df_csv.reset_index(drop=True)
-                            
-                        # 如果还有多级索引，设置合适的索引
-                        # index_columns = [col for col in ['code', 'date', 'month'] if col in df_csv.columns]
-                        # if index_columns:
-                        #     df_csv.set_index(index_columns, inplace=True)
-
-                        date_s, date_e = get_trading_days(self.date_s, self.date_e)
-
-                        date_s = datetime.strptime(date_s, '%Y-%m-%d')
-                        date_e = datetime.strptime(date_e, '%Y-%m-%d')
-
-                        dates = df_csv.index.get_level_values('date')
-
-                        if (datetime.strptime(dates[0], '%Y-%m-%d') <= date_s) and (datetime.strptime(dates[-1], '%Y-%m-%d') >= date_e):
-                            print(f'{decorator_filename}时间符合要求: 读取本地文件')
-                            time_range = slice(datetime.strftime(date_s, "%Y-%m-%d"),datetime.strftime(date_e, "%Y-%m-%d"),)
-                            date_index = df_csv.index.names.index('date')
-                            slicer = ([slice(None)] * len(df_csv.index.names))
-                            slicer[date_index] =  time_range
-                            slicer = tuple(slicer)
-
-                            df_csv = df_csv.loc[slicer, :]
-                            return df_csv
-                        else:
-                            print(f'{decorator_filename}日期不匹配，执行原始函数并更新CSV文件')
-                            # 日期不匹配，执行原始函数并新CSV文件
-                            result = func(self, *args, **kwargs)
-                            result.to_csv(csv_file_path)
-                            return result
-                    except Exception as e:
-                        # 如果读取CSV文件出错，执行原始函数
-                        print(f'读取CSV文件时出错: {e}，执行原始函数。')
-                        result = func(self, *args, **kwargs)
-                        result.to_csv(csv_file_path)
-                        return result
-                else:
-                    print(f'{decorator_filename}文件不存在，执行原始函数并保存结果。')
-                    result = func(self, *args, **kwargs)
-                    result.to_csv(csv_file_path)
-                    return result
-            else:
-                print(f'csv模式关闭，执行原始函数')
-                # csv_folder不存在，执行原始函数
+            decorator_filename = f"{file_name}_{suffix}{file_extension}" if suffix else csv_filename
+            
+            if not hasattr(self, 'csv_folder') or not self.csv_folder:
                 return func(self, *args, **kwargs)
-
+                
+            csv_file_path = os.path.join(self.csv_folder, decorator_filename)
+            if not os.path.exists(csv_file_path):
+                result = func(self, *args, **kwargs)
+                result.to_csv(csv_file_path)
+                return result
+                
+            try:
+                df_csv = pd.read_csv(csv_file_path, index_col=[0, 1])
+                dates = df_csv.index.get_level_values('date')
+                date_s = datetime.strptime(self.date_s, '%Y-%m-%d')
+                date_e = datetime.strptime(self.date_e, '%Y-%m-%d')
+                
+                if (datetime.strptime(dates[0], '%Y-%m-%d') <= date_s and 
+                    datetime.strptime(dates[-1], '%Y-%m-%d') >= date_e):
+                    time_range = slice(
+                        datetime.strftime(date_s, "%Y-%m-%d"),
+                        datetime.strftime(date_e, "%Y-%m-%d")
+                    )
+                    date_index = df_csv.index.names.index('date')
+                    slicer = [slice(None)] * len(df_csv.index.names)
+                    slicer[date_index] = time_range
+                    return df_csv.loc[tuple(slicer), :]
+                    
+            except Exception as e:
+                logger.error(f'读取CSV文件时出错: {e}')
+                
+            result = func(self, *args, **kwargs)
+            result.to_csv(csv_file_path)
+            return result
+            
         return wrapper
     return decorator
 

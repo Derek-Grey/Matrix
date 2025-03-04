@@ -8,6 +8,7 @@
 """
 from pathlib import Path
 
+# 基础路径配置
 BASE_DIR = str(Path(__file__).resolve().parent.parent)
 BASE_DIR_P = str(Path(__file__).resolve().parent.parent.parent)
 
@@ -16,10 +17,12 @@ BASE_DIR_P = str(Path(__file__).resolve().parent.parent.parent)
 # NEO_DEV = True
 # SERVER = False
 
+# MongoDB连接配置
 CLIENT_DEV = 'mongodb://localhost:27017/'
 CLIENT_NEO = 'mongodb://192.168.1.77:27017/'
 CLIENT_SERVER = 'mongodb://192.168.1.76:27017/'
 
+# 数据库名称配置
 DB_U_WIND = 'basic_wind'
 DB_U_JQ = 'basic_jq'
 DB_U_ECO = 'economic'
@@ -53,14 +56,18 @@ DB_DEV_BACKTEST_TEST = 'backtest_pos_test'  # 产品选股结果，回测数据�
 DB_DEV_BACKTEST_CHG = 'backtest_chg'  # 产品选股结果对应的涨跌幅数据，回测数据库，在DEV本地上，
 DB_DEV_BACKTEST_CHG_TEST = 'backtest_chg_test'  # 产品选股结果对应的涨跌幅数据，回测数据库，在DEV本地上，测试用
 
-# 不参与RANK的行业
-USELESS_INDUS = ["证券、期货业", "银行业", "货币金融服务", "其他金融业", "资本市场服务", "保险业",
-                 "燃气生产和供应业", "电力、蒸汽、热水的生产和供应业", "煤气生产和供应业", "电力、热力生产和供应业",
-                 "水的生产和供应业", "自来水的生产和供应业", "卫生", "公共设施服务业",
-                 "房屋建筑业", "房地产业", "房地产中介服务业", "房地产管理业", "房地产开发与经营业",
-                 '金融信托业',
-                 ]
+# 不参与RANK的行业列表
+USELESS_INDUS = [
+    "证券、期货业", "银行业", "货币金融服务", "其他金融业", 
+    "资本市场服务", "保险业", "燃气生产和供应业",
+    "电力、蒸汽、热水的生产和供应业", "煤气生产和供应业",
+    "电力、热力生产和供应业", "水的生产和供应业",
+    "自来水的生产和供应业", "卫生", "公共设施服务业",
+    "房屋建筑业", "房地产业", "房地产中介服务业",
+    "房地产管理业", "房地产开发与经营业", "金融信托业",
+]
 
+# 策略回测配置
 DICT_STRATEGY_BT = {
     "alpha_first": ("bt_alpha_first", 0, 50),
     'yk_first': ('bt_yk_first', 100, 50),
