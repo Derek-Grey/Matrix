@@ -232,21 +232,83 @@ class DataChecker:
         
         print("=================\n")
 
-def calculate_portfolio_metrics(weight_file, return_file):
+def get_returns_from_db(dates, codes):
+    """从数据库获取指定日期和股票代码的收益率数据
+    
+    Args:
+        dates (list): 日期列表
+        codes (list): 股票代码列表
+        
+    Returns:
+        pd.DataFrame: 包含date、code、return列的收益率数据框
+        
+    Raises:
+        Exception: 当数据库查询出错或数据不完整时抛出异常
+    """
+    try:
+        client = get_client_U('r')
+        returns_data = []
+        
+        for date in dates:
+            # 查询该日期所有股票的收益率
+            query = {
+                "date": date,
+                "code": {"$in": list(codes)}
+            }
+            daily_returns = list(client.basic_wind.w_vol_price.find(
+                query,
+                {"_id": 0, "code": 1, "pct_chg": 1, "date": 1}
+            ))
+            
+            # 转换为DataFrame格式
+            for record in daily_returns:
+                returns_data.append({
+                    'date': record['date'],
+                    'code': record['code'],
+                    'return': float(record['pct_chg']) / 100  # 转换为小数
+                })
+        
+        client.close()
+        returns = pd.DataFrame(returns_data)
+        
+        # 检查是否所有需要的数据都获取到了
+        missing_dates = set(dates) - set(returns['date'].unique())
+        if missing_dates:
+            raise ValueError(f"数据库中缺少以下日期的收益率数据: {missing_dates}")
+        
+        missing_codes = set(codes) - set(returns['code'].unique())
+        if missing_codes:
+            raise ValueError(f"数据库中缺少以下股票的收益率数据: {missing_codes}")
+        
+        return returns
+        
+    except Exception as e:
+        raise Exception(f"从数据库获取收益率数据时出错: {str(e)}")
+
+def calculate_portfolio_metrics(weight_file, return_file=None):
     """计算投资组合的收益率和换手率
     
     Args:
         weight_file (str): 权重数据文件路径
-        return_file (str): 收益率数据文件路径
+        return_file (str, optional): 收益率数据文件路径。如果为None，将从数据库获取收益率数据
         
     Returns:
         tuple: (portfolio_returns, turnover)
             - portfolio_returns (pd.Series): 投资组合每期收益率
             - turnover (pd.Series): 投资组合每期换手率
     """
-    # 读取数据
+    # 读取权重数据
     weights = pd.read_csv(weight_file)
-    returns = pd.read_csv(return_file)
+    
+    # 如果没有提供收益率文件，从数据库获取数据
+    if return_file is None:
+        print("\n未提供收益率数据文件，将从数据库获取收益率数据...")
+        unique_dates = weights['date'].unique()
+        unique_codes = weights['code'].unique()
+        returns = get_returns_from_db(unique_dates, unique_codes)
+        print(f"成功从数据库获取了 {len(returns)} 条收益率记录")
+    else:
+        returns = pd.read_csv(return_file)
     
     # 判断是否为分钟频数据
     is_minute = 'time' in weights.columns
@@ -326,16 +388,13 @@ if __name__ == "__main__":
         'csv_folder/test_minute_return.csv'
     )
     
-    # 读取日频数据
+    # 读取日频数据并计算指标
     weights = pd.read_csv('csv_folder/test_daily_weight.csv')
-    returns = pd.read_csv('csv_folder/test_daily_return.csv')
     
     # 检查交易日
     checker.check_trading_dates(weights)
-    checker.check_trading_dates(returns)
     
-    # 计算日频的投资组合指标
+    # 计算日频的投资组合指标（将从数据库获取收益率数据）
     calculate_portfolio_metrics(
-        'csv_folder/test_daily_weight.csv',
-        'csv_folder/test_daily_return.csv'
+        'csv_folder/test_daily_weight.csv'
     ) 

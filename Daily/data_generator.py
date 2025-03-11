@@ -32,7 +32,7 @@ def create_minute_data(is_weight=True):
             - weight/return: 权重或收益率数据
     """
     # 获取有效交易日
-    valid_dates = get_valid_trading_dates('2024-01-02', '2024-01-31')
+    valid_dates = get_valid_trading_dates('2024-01-02', '2024-01-03')
     if not valid_dates:
         raise ValueError("未找到有效交易日")
     
@@ -88,7 +88,7 @@ def create_daily_data(is_weight=True):
             - weight/return: 权重或收益率数据
     """
     # 获取有效交易日
-    valid_dates = get_valid_trading_dates('2024-01-02', '2024-12-31')
+    valid_dates = get_valid_trading_dates('2023-01-02', '2024-01-31')
     if not valid_dates:
         raise ValueError("未找到有效交易日")
     
