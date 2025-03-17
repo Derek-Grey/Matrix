@@ -1,10 +1,5 @@
 import sys
 import os
-
-# 将项目根目录添加到 Python 路径
-root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(root_dir)
-
 import pandas as pd
 import numpy as np
 from db_client import get_client_U
@@ -12,32 +7,31 @@ from urllib.parse import quote_plus
 
 class DataChecker:
     def __init__(self):
+        self.trading_dates = self._fetch_trading_dates()
+
+    def _fetch_trading_dates(self):
+        """Fetch trading dates from the database."""
         try:
-            # 使用已有的数据库连接函数
-            client = get_client_U('r')  # 使用只读权限
+            client = get_client_U('r')
             db = client['economic']
             collection = db['trade_dates']
-            
-            # 获取所有交易日期
             trading_dates = list(collection.find({}, {'_id': 0, 'trade_date': 1}))
             client.close()
-            
-            # 将交易日期转换为字符串格式的集合，方便查找
-            self.trading_dates = set(d['trade_date'] for d in trading_dates)
-            
-            # 输出交易日信息
-            print("\n=== 交易日信息 ===")
-            print(f"交易日总数: {len(self.trading_dates)}")
-            print("交易日示例(前5个):", sorted(list(self.trading_dates))[:5])
-            print("最近的交易日(后5个):", sorted(list(self.trading_dates))[-5:])
-            print("=================\n")
-            
+            trading_dates_set = set(d['trade_date'] for d in trading_dates)
+            self._print_trading_dates_info(trading_dates_set)
+            return trading_dates_set
         except Exception as e:
-            print(f"\n=== MongoDB连接错误 ===")
-            print(f"错误信息: {str(e)}")
-            print("===================\n")
+            print(f"\n=== MongoDB连接错误 ===\n错误信息: {str(e)}\n===================\n")
             raise
-        
+
+    def _print_trading_dates_info(self, trading_dates):
+        """Print trading dates information."""
+        print("\n=== 交易日信息 ===")
+        print(f"交易日总数: {len(trading_dates)}")
+        print("交易日示例(前5个):", sorted(list(trading_dates))[:5])
+        print("最近的交易日(后5个):", sorted(list(trading_dates))[-5:])
+        print("=================\n")
+
     def check_time_format(self, df):
         """检查时间列格式是否符合HH:MM:SS格式，并验证是否在交易时间内
         
@@ -204,197 +198,143 @@ class DataChecker:
         print(f"时间频率检查通过，数据频率为: {freq_minutes} 分钟")
 
     def check_trading_dates(self, df):
-        """检查数据是否包含非交易日
-        
-        Args:
-            df (pd.DataFrame): 包含 'date' 列的数据框
-            
-        Raises:
-            ValueError: 当数据包含非交易日时抛出异常
-        """
-        # 将输入数据的日期转换为与数据库相同的字符串格式 (YYYY-MM-DD)
+        """检查数据是否包含非交易日"""
         dates = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d').unique()
-        
-        print("\n=== 检查日期信息 ===")
-        print("待检查的日期:", dates)
-        
-        # 检查非交易日
+        print("\n=== 检查日期信息 ===\n待检查的日期:", dates)
         invalid_dates = [d for d in dates if d not in self.trading_dates]
         if invalid_dates:
             print("交易日集合中包含的部分日期:", sorted(list(self.trading_dates))[-10:])
             raise ValueError(f"数据包含非交易日: {invalid_dates}")
-        
-        # 检查时间格式（如果存在time列）
-        self.check_time_format(df)
-        
-        # 检查时间频率
-        self.check_time_frequency(df)
-        
         print("=================\n")
 
-def get_returns_from_db(dates, codes):
-    """从数据库获取指定日期和股票代码的收益率数据
-    
-    Args:
-        dates (list): 日期列表
-        codes (list): 股票代码列表
-        
-    Returns:
-        pd.DataFrame: 包含date、code、return列的收益率数据框
-        
-    Raises:
-        Exception: 当数据库查询出错或数据不完整时抛出异常
-    """
-    try:
-        client = get_client_U('r')
-        returns_data = []
-        
-        for date in dates:
-            # 查询该日期所有股票的收益率
-            query = {
-                "date": date,
-                "code": {"$in": list(codes)}
-            }
-            daily_returns = list(client.basic_wind.w_vol_price.find(
-                query,
-                {"_id": 0, "code": 1, "pct_chg": 1, "date": 1}
-            ))
-            
-            # 转换为DataFrame格式
-            for record in daily_returns:
-                returns_data.append({
-                    'date': record['date'],
-                    'code': record['code'],
-                    'return': float(record['pct_chg']) / 100  # 转换为小数
-                })
-        
-        client.close()
-        returns = pd.DataFrame(returns_data)
-        
-        # 检查是否所有需要的数据都获取到了
+class PortfolioMetrics:
+    def __init__(self, weight_file, return_file=None, use_equal_weights=True):
+        self.weight_file = weight_file
+        self.return_file = return_file
+        self.use_equal_weights = use_equal_weights
+        self.weights = None
+        self.returns = None
+        self.index_cols = None
+        self.is_minute = None
+        self.prepare_data()
+
+    def prepare_data(self):
+        """Prepare the data for portfolio metrics calculation."""
+        self.weights = pd.read_csv(self.weight_file)
+        self._validate_weights()
+        self.returns = self._fetch_returns()
+        self._validate_returns()
+        self._set_index_columns()
+
+    def _validate_weights(self):
+        """Validate the weights data."""
+        required_weight_columns = ['date', 'code']
+        missing_weight_columns = [col for col in required_weight_columns if col not in self.weights.columns]
+        if missing_weight_columns:
+            raise ValueError(f"权重表缺少必要的列: {missing_weight_columns}")
+
+    def _fetch_returns(self):
+        """Fetch returns data from file or database."""
+        if self.return_file is None:
+            print("\n未提供收益率数据文件，将从数据库获取收益率数据...")
+            unique_dates = self.weights['date'].unique()
+            unique_codes = self.weights['code'].unique()
+            returns = self.get_returns_from_db(unique_dates, unique_codes)
+            print(f"成功从数据库获取了 {len(returns)} 条收益率记录")
+            return returns
+        else:
+            return pd.read_csv(self.return_file)
+
+    def _validate_returns(self):
+        """Validate the returns data."""
+        required_return_columns = ['return']
+        missing_return_columns = [col for col in required_return_columns if col not in self.returns.columns]
+        if missing_return_columns:
+            raise ValueError(f"收益率表缺少必要的列: {missing_return_columns}")
+
+    def _set_index_columns(self):
+        """Set index columns based on data frequency."""
+        self.is_minute = 'time' in self.weights.columns
+        if self.is_minute:
+            self.weights['datetime'] = pd.to_datetime(self.weights['date'] + ' ' + self.weights['time'])
+            self.returns['datetime'] = pd.to_datetime(self.returns['date'] + ' ' + self.returns['time'])
+            self.index_cols = ['datetime', 'code']
+        else:
+            self.weights['date'] = pd.to_datetime(self.weights['date'])
+            self.returns['date'] = pd.to_datetime(self.returns['date'])
+            self.index_cols = ['date', 'code']
+        self._apply_equal_weights()
+
+    def _apply_equal_weights(self):
+        """Apply equal weights if necessary."""
+        if 'weight' not in self.weights.columns:
+            if self.use_equal_weights:
+                print("权重列缺失，使用等权重")
+                self.weights['weight'] = 1.0 / self.weights.groupby(self.index_cols[0])['code'].transform('count')
+            else:
+                raise ValueError("权重列缺失，且未设置使用等权重")
+
+    def get_returns_from_db(self, dates, codes):
+        """Fetch returns data from the database."""
+        try:
+            client = get_client_U('r')
+            returns_data = []
+            for date in dates:
+                query = {"date": date, "code": {"$in": list(codes)}}
+                daily_returns = list(client.basic_wind.w_vol_price.find(query, {"_id": 0, "code": 1, "pct_chg": 1, "date": 1}))
+                for record in daily_returns:
+                    returns_data.append({'date': record['date'], 'code': record['code'], 'return': float(record['pct_chg']) / 100})
+            client.close()
+            returns = pd.DataFrame(returns_data)
+            self._validate_fetched_returns(returns, dates, codes)
+            return returns
+        except Exception as e:
+            raise Exception(f"从数据库获取收益率数据时出错: {str(e)}")
+
+    def _validate_fetched_returns(self, returns, dates, codes):
+        """Validate the fetched returns data."""
+        if returns.empty:
+            raise ValueError("从数据库获取的收益率数据为空")
         missing_dates = set(dates) - set(returns['date'].unique())
         if missing_dates:
             raise ValueError(f"数据库中缺少以下日期的收益率数据: {missing_dates}")
-        
         missing_codes = set(codes) - set(returns['code'].unique())
         if missing_codes:
             raise ValueError(f"数据库中缺少以下股票的收益率数据: {missing_codes}")
-        
-        return returns
-        
-    except Exception as e:
-        raise Exception(f"从数据库获取收益率数据时出错: {str(e)}")
 
-def calculate_portfolio_metrics(weight_file, return_file=None):
-    """计算投资组合的收益率和换手率
-    
-    Args:
-        weight_file (str): 权重数据文件路径
-        return_file (str, optional): 收益率数据文件路径。如果为None，将从数据库获取收益率数据
-        
-    Returns:
-        tuple: (portfolio_returns, turnover)
-            - portfolio_returns (pd.Series): 投资组合每期收益率
-            - turnover (pd.Series): 投资组合每期换手率
-    """
-    # 读取权重数据
-    weights = pd.read_csv(weight_file)
-    
-    # 如果没有提供收益率文件，从数据库获取数据
-    if return_file is None:
-        print("\n未提供收益率数据文件，将从数据库获取收益率数据...")
-        unique_dates = weights['date'].unique()
-        unique_codes = weights['code'].unique()
-        returns = get_returns_from_db(unique_dates, unique_codes)
-        print(f"成功从数据库获取了 {len(returns)} 条收益率记录")
-    else:
-        returns = pd.read_csv(return_file)
-    
-    # 判断是否为分钟频数据
-    is_minute = 'time' in weights.columns
-    
-    # 设置索引
-    if is_minute:
-        weights['datetime'] = pd.to_datetime(weights['date'] + ' ' + weights['time'])
-        returns['datetime'] = pd.to_datetime(returns['date'] + ' ' + returns['time'])
-        index_cols = ['datetime', 'code']
-    else:
-        weights['date'] = pd.to_datetime(weights['date'])
-        returns['date'] = pd.to_datetime(returns['date'])
-        index_cols = ['date', 'code']
-    
-    # 将数据转换为宽格式
-    weights_wide = weights.pivot(
-        index=index_cols[0],
-        columns='code',
-        values='weight'
-    )
-    returns_wide = returns.pivot(
-        index=index_cols[0],
-        columns='code',
-        values='return'
-    )
-    
-    # 计算组合收益率
-    portfolio_returns = (weights_wide * returns_wide).sum(axis=1)
-    
-    # 计算换手率
-    weights_shift = weights_wide.shift(1)
-    
-    # 处理第一个时间点
-    turnover = pd.Series(index=weights_wide.index)
-    turnover.iloc[0] = weights_wide.iloc[0].abs().sum()  # 第一个时间点的换手率为权重绝对值之和
-    
-    # 计算其他时间点的换手率
-    for i in range(1, len(weights_wide)):
-        # 获取当前和前一时间点的权重
-        curr_weights = weights_wide.iloc[i]
-        prev_weights = weights_wide.iloc[i-1]
-        
-        # 计算前一时间点权重在当前时间点的理论值
-        returns_t = returns_wide.iloc[i-1]
-        theoretical_weights = prev_weights * (1 + returns_t)
-        theoretical_weights = theoretical_weights / theoretical_weights.sum()  # 归一化
-        
-        # 计算换手率
-        turnover.iloc[i] = np.abs(curr_weights - theoretical_weights).sum() / 2
-    
-    # 保存结果
-    results = pd.DataFrame({
-        'portfolio_return': portfolio_returns,
-        'turnover': turnover
-    })
-    
-    output_prefix = 'minute' if is_minute else 'daily'
-    results.to_csv(f'csv_folder/test_{output_prefix}_portfolio_metrics.csv')
-    
-    print(f"已保存{output_prefix}频投资组合指标数据，共 {len(results)} 行")
-    
-    return portfolio_returns, turnover
+    def calculate_portfolio_metrics(self):
+        """Calculate portfolio returns and turnover."""
+        weights_wide = self.weights.pivot(index=self.index_cols[0], columns='code', values='weight')
+        returns_wide = self.returns.pivot(index=self.index_cols[0], columns='code', values='return')
+        portfolio_returns = (weights_wide * returns_wide).sum(axis=1)
+        turnover = self._calculate_turnover(weights_wide, returns_wide)
+        self._save_results(portfolio_returns, turnover)
+        return portfolio_returns, turnover
+
+    def _calculate_turnover(self, weights_wide, returns_wide):
+        """Calculate turnover."""
+        weights_shift = weights_wide.shift(1)
+        turnover = pd.Series(index=weights_wide.index)
+        turnover.iloc[0] = weights_wide.iloc[0].abs().sum()
+        for i in range(1, len(weights_wide)):
+            curr_weights = weights_wide.iloc[i]
+            prev_weights = weights_wide.iloc[i-1]
+            returns_t = returns_wide.iloc[i-1]
+            theoretical_weights = prev_weights * (1 + returns_t)
+            theoretical_weights = theoretical_weights / theoretical_weights.sum()
+            turnover.iloc[i] = np.abs(curr_weights - theoretical_weights).sum() / 2
+        return turnover
+
+    def _save_results(self, portfolio_returns, turnover):
+        """Save the results to a CSV file."""
+        results = pd.DataFrame({'portfolio_return': portfolio_returns, 'turnover': turnover})
+        output_prefix = 'minute' if self.is_minute else 'daily'
+        results.to_csv(f'csv_folder/test_{output_prefix}_portfolio_metrics.csv')
+        print(f"已保存{output_prefix}频投资组合指标数据，共 {len(results)} 行")
 
 if __name__ == "__main__":
-    # 读取数据
-    weights = pd.read_csv('csv_folder/test_minute_weight.csv')
-    returns = pd.read_csv('csv_folder/test_minute_return.csv')
-    
-    # 检查交易日
     checker = DataChecker()
-    checker.check_trading_dates(weights)
-    checker.check_trading_dates(returns)
-    
-    # 计算分钟频的投资组合指标
-    calculate_portfolio_metrics(
-        'csv_folder/test_minute_weight.csv',
-        'csv_folder/test_minute_return.csv'
-    )
-    
-    # 读取日频数据并计算指标
     weights = pd.read_csv('csv_folder/test_daily_weight.csv')
-    
-    # 检查交易日
     checker.check_trading_dates(weights)
-    
-    # 计算日频的投资组合指标（将从数据库获取收益率数据）
-    calculate_portfolio_metrics(
-        'csv_folder/test_daily_weight.csv'
-    ) 
+    portfolio_metrics = PortfolioMetrics('csv_folder/test_daily_weight.csv')
+    portfolio_metrics.calculate_portfolio_metrics() 

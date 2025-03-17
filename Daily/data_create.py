@@ -29,8 +29,15 @@ def get_random_stocks_and_returns(date: str, client) -> Tuple[List[str], List[fl
     num_stocks = random.randint(40, 50)
     selected_stocks = random.sample(daily_data, min(num_stocks, len(daily_data)))
     
+    # Ensure the lists have the same length
+    if len(selected_stocks) == 0:
+        return [], []
+    
     codes = [stock['code'] for stock in selected_stocks]
     returns = [float(stock['pct_chg']) for stock in selected_stocks]
+    
+    # Check if lengths are equal
+    assert len(codes) == len(returns), "Codes and returns lists must have the same length"
     
     return codes, returns
 
@@ -64,7 +71,8 @@ def create_minute_data(date: str, stocks: List[str], is_weight=True) -> pd.DataF
     for t in valid_times:
         time_str = t.strftime('%H:%M:%S')
         if is_weight:
-            values = np.random.dirichlet(np.ones(len(stocks)))
+            # Equal weights for all stocks
+            values = [1.0 / len(stocks)] * len(stocks)
         else:
             values = np.random.normal(0.0001, 0.001, len(stocks))
             
@@ -117,12 +125,13 @@ def generate_all_data(start_date='2024-01-02', end_date='2024-12-31',
     for date in daily_dates:
         codes, returns = get_random_stocks_and_returns(date, client)
         
-        # 生成日频权重数据
-        weights = np.random.dirichlet(np.ones(len(codes)))
+        # 生成日频权重数据 with dynamic weights
+        total_stocks = len(codes)
+        weights = np.random.dirichlet(np.ones(total_stocks), size=1).flatten()
         daily_weights.extend([{
             'date': date,
             'code': code,
-            'weight': weight
+            'weight': weight  # Add weight to daily data
         } for code, weight in zip(codes, weights)])
         
         # 生成日频收益率数据
