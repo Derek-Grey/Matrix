@@ -329,7 +329,7 @@ class PortfolioMetrics:
         """Save the results to a CSV file."""
         results = pd.DataFrame({'portfolio_return': portfolio_returns, 'turnover': turnover})
         output_prefix = 'minute' if self.is_minute else 'daily'
-        results.to_csv(f'csv_folder/test_{output_prefix}_portfolio_metrics.csv')
+        results.to_csv(f'output/test_{output_prefix}_portfolio_metrics.csv')
         print(f"已保存{output_prefix}频投资组合指标数据，共 {len(results)} 行")
 
 if __name__ == "__main__":
