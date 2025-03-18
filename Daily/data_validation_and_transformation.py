@@ -25,8 +25,10 @@ class PortfolioWeightAdjuster:
     def validate_weights_sum(self) -> bool:
         """验证CSV文件中每个时间点的权重和是否为1"""
         try:
+            # 按时间分组并计算每组的权重和
             grouped = self.df.groupby(self.time_column)['weight'].sum()
             for time_value, weight_sum in grouped.items():
+                # 检查每个时间点的权重和是否在允许的范围内
                 if not (0.999 <= weight_sum <= 1.001):
                     print(f"数据验证失败：{self.csv_file_path} 中 {time_value} 的权重和不为1 (当前和为 {weight_sum})")
                     return False
@@ -40,6 +42,7 @@ class PortfolioWeightAdjuster:
         """从CSV文件中提取目标权重"""
         target_weights_list = []
         codes_list = []
+        # 按时间分组提取每组的权重和代码
         for time_value, group in self.df.groupby(self.time_column):
             target_weights = group['weight'].tolist()
             codes = group['code'].tolist()
@@ -49,6 +52,7 @@ class PortfolioWeightAdjuster:
 
     def get_initial_weights(self):
         """从CSV文件中提取初始权重"""
+        # 获取第一个时间点的权重
         first_time_value = self.df[self.time_column].iloc[0]
         initial_weights = self.df[self.df[self.time_column] == first_time_value]['weight'].tolist()
         return initial_weights
@@ -56,8 +60,10 @@ class PortfolioWeightAdjuster:
     def adjust_weights_over_days(self, current_weights, target_weights_list, codes_list):
         """调整当前权重向多个目标权重靠近，具有变化限制。"""
         adjusted_weights_list = []
+        # 遍历每个目标权重列表
         for target_weights, codes in zip(target_weights_list, codes_list):
             adjusted_weights = []
+            # 遍历所有代码
             for code in self.all_codes:
                 if code in codes:
                     target_index = codes.index(code)
@@ -68,6 +74,7 @@ class PortfolioWeightAdjuster:
                 current_index = self.all_codes.index(code)
                 current_weight = current_weights[current_index] if current_index < len(current_weights) else 0
 
+                # 计算权重变化并应用限制
                 weight_change = target_weight - current_weight
                 if abs(weight_change) > self.change_limit:
                     weight_change = self.change_limit if weight_change > 0 else -self.change_limit
@@ -87,6 +94,7 @@ class PortfolioWeightAdjuster:
         """保存调整后的权重到CSV"""
         with open(output_file, 'w') as f:
             f.write(f'{self.time_column},code,adjusted_weight\n')
+            # 写入每个时间点的调整后权重
             for time_value, weights in zip(self.time_values, adjusted_weights_list):
                 for code, weight in zip(self.all_codes, weights):
                     if weight != 0:
@@ -165,10 +173,14 @@ class PortfolioWeightAdjuster:
             print(f"绘制调整后权重和图时出错：{e}")
 
 if __name__ == "__main__":
+    # 定义输入和输出文件路径
     csv_file_path = 'csv/test_daily_weight.csv' 
     output_file = 'csv/adjusted_weights.csv'
+    
+    # 创建PortfolioWeightAdjuster对象
     adjuster = PortfolioWeightAdjuster(csv_file_path)
 
+    # 验证权重和并进行调整和保存
     if adjuster.validate_weights_sum():
         target_weights_list, codes_list = adjuster.get_target_weights_from_csv()
         current_weights = adjuster.get_initial_weights()

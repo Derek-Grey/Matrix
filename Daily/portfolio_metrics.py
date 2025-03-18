@@ -10,7 +10,7 @@ class DataChecker:
         self.trading_dates = self._fetch_trading_dates()
 
     def _fetch_trading_dates(self):
-        """Fetch trading dates from the database."""
+        """从数据库获取交易日"""
         try:
             client = get_client_U('r')
             db = client['economic']
@@ -25,7 +25,7 @@ class DataChecker:
             raise
 
     def _print_trading_dates_info(self, trading_dates):
-        """Print trading dates information."""
+        """打印交易日信息"""
         print("\n=== 交易日信息 ===")
         print(f"交易日总数: {len(trading_dates)}")
         print("交易日示例(前5个):", sorted(list(trading_dates))[:5])
@@ -219,7 +219,7 @@ class PortfolioMetrics:
         self.prepare_data()
 
     def prepare_data(self):
-        """Prepare the data for portfolio metrics calculation."""
+        """为投资组合指标计算准备数据。"""
         self.weights = pd.read_csv(self.weight_file)
         self._validate_weights()
         self.returns = self._fetch_returns()
@@ -227,14 +227,14 @@ class PortfolioMetrics:
         self._set_index_columns()
 
     def _validate_weights(self):
-        """Validate the weights data."""
+        """验证权重数据"""
         required_weight_columns = ['date', 'code']
         missing_weight_columns = [col for col in required_weight_columns if col not in self.weights.columns]
         if missing_weight_columns:
             raise ValueError(f"权重表缺少必要的列: {missing_weight_columns}")
 
     def _fetch_returns(self):
-        """Fetch returns data from file or database."""
+        """从文件或数据库获取收益率数据"""
         if self.return_file is None:
             print("\n未提供收益率数据文件，将从数据库获取收益率数据...")
             unique_dates = self.weights['date'].unique()
@@ -246,14 +246,14 @@ class PortfolioMetrics:
             return pd.read_csv(self.return_file)
 
     def _validate_returns(self):
-        """Validate the returns data."""
+        """验证收益率数据"""
         required_return_columns = ['return']
         missing_return_columns = [col for col in required_return_columns if col not in self.returns.columns]
         if missing_return_columns:
             raise ValueError(f"收益率表缺少必要的列: {missing_return_columns}")
 
     def _set_index_columns(self):
-        """Set index columns based on data frequency."""
+        """根据数据频率设置索引列"""
         self.is_minute = 'time' in self.weights.columns
         if self.is_minute:
             self.weights['datetime'] = pd.to_datetime(self.weights['date'] + ' ' + self.weights['time'])
@@ -266,7 +266,7 @@ class PortfolioMetrics:
         self._apply_equal_weights()
 
     def _apply_equal_weights(self):
-        """Apply equal weights if necessary."""
+        """如果需要，应用等权重"""
         if 'weight' not in self.weights.columns:
             if self.use_equal_weights:
                 print("权重列缺失，使用等权重")
@@ -275,7 +275,7 @@ class PortfolioMetrics:
                 raise ValueError("权重列缺失，且未设置使用等权重")
 
     def get_returns_from_db(self, dates, codes):
-        """Fetch returns data from the database."""
+        """从数据库获取收益率数据"""
         try:
             client = get_client_U('r')
             returns_data = []
@@ -292,7 +292,7 @@ class PortfolioMetrics:
             raise Exception(f"从数据库获取收益率数据时出错: {str(e)}")
 
     def _validate_fetched_returns(self, returns, dates, codes):
-        """Validate the fetched returns data."""
+        """验证从数据库获取的收益率数据"""
         if returns.empty:
             raise ValueError("从数据库获取的收益率数据为空")
         missing_dates = set(dates) - set(returns['date'].unique())
@@ -303,7 +303,7 @@ class PortfolioMetrics:
             raise ValueError(f"数据库中缺少以下股票的收益率数据: {missing_codes}")
 
     def calculate_portfolio_metrics(self):
-        """Calculate portfolio returns and turnover."""
+        """计算投资组合收益率和换手率"""
         weights_wide = self.weights.pivot(index=self.index_cols[0], columns='code', values='weight')
         returns_wide = self.returns.pivot(index=self.index_cols[0], columns='code', values='return')
         portfolio_returns = (weights_wide * returns_wide).sum(axis=1)
@@ -312,7 +312,7 @@ class PortfolioMetrics:
         return portfolio_returns, turnover
 
     def _calculate_turnover(self, weights_wide, returns_wide):
-        """Calculate turnover."""
+        """计算换手率"""
         weights_shift = weights_wide.shift(1)
         turnover = pd.Series(index=weights_wide.index)
         turnover.iloc[0] = weights_wide.iloc[0].abs().sum()
@@ -326,7 +326,7 @@ class PortfolioMetrics:
         return turnover
 
     def _save_results(self, portfolio_returns, turnover):
-        """Save the results to a CSV file."""
+        """将结果保存到CSV文件"""
         results = pd.DataFrame({'portfolio_return': portfolio_returns, 'turnover': turnover})
         output_prefix = 'minute' if self.is_minute else 'daily'
         results.to_csv(f'output/test_{output_prefix}_portfolio_metrics.csv')
