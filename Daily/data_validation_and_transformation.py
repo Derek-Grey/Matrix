@@ -1,5 +1,7 @@
 import pandas as pd
 import os
+import plotly.graph_objects as go
+from plotly.offline import plot
 
 class PortfolioWeightAdjuster:
     def __init__(self, csv_file_path, change_limit=0.05):
@@ -7,6 +9,7 @@ class PortfolioWeightAdjuster:
         self.change_limit = change_limit
         self.df = pd.read_csv(csv_file_path)
         
+        # 检查是否有 'datetime' 列，并将其转换为日期时间格式
         if 'datetime' in self.df.columns:
             self.df['datetime'] = pd.to_datetime(self.df['datetime'])
             self.time_column = 'datetime'
@@ -14,7 +17,9 @@ class PortfolioWeightAdjuster:
             self.df['date'] = pd.to_datetime(self.df['date'])
             self.time_column = 'date'
         
+        # 获取所有代码的集合并排序
         self.all_codes = sorted(set(self.df['code']))
+        # 获取时间列的唯一值
         self.time_values = self.df[self.time_column].unique()
 
     def validate_weights_sum(self) -> bool:
@@ -87,6 +92,78 @@ class PortfolioWeightAdjuster:
                     if weight != 0:
                         f.write(f'{time_value},{code},{weight}\n')
 
+    def plot_adjusted_weight_sums(self, adjusted_weights_list):
+        """使用plotly绘制调整后的权重和随时间的变化图"""
+        try:
+            # 计算每个时间点调整后的权重和
+            adjusted_sums = [sum(weights) for weights in adjusted_weights_list]
+            
+            # 创建图形
+            fig = go.Figure()
+            
+            # 添加实际权重和的线
+            fig.add_trace(
+                go.Scatter(
+                    x=self.time_values,
+                    y=adjusted_sums,
+                    mode='lines+markers',
+                    name='实际权重和',
+                    line=dict(color='#2E86C1', width=2),
+                    marker=dict(
+                        size=8,
+                        color='white',
+                        line=dict(color='#2E86C1', width=2)
+                    )
+                )
+            )
+            
+            # 添加目标权重和的参考线
+            fig.add_hline(
+                y=1.0,
+                line=dict(color='#E74C3C', dash='dash'),
+                opacity=0.5,
+                name='目标权重和'
+            )
+            
+            # 更新布局
+            fig.update_layout(
+                title={
+                    'text': '调整后权重和变化',
+                    'y': 0.95,
+                    'x': 0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top',
+                    'font': dict(size=20)
+                },
+                xaxis_title='时间',
+                yaxis_title='权重和',
+                template='plotly_white',
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=0.01
+                ),
+                xaxis=dict(
+                    tickangle=30,
+                    tickformat='%Y-%m-%d'
+                ),
+                hovermode='x unified'
+            )
+            
+            # 调整y轴范围
+            max_sum = max(adjusted_sums)
+            min_sum = min(adjusted_sums)
+            margin = (max_sum - min_sum) * 0.1
+            fig.update_yaxes(range=[min_sum - margin, max_sum + margin])
+            
+            # 显示图形
+            fig.show()
+            
+        except Exception as e:
+            print(f"绘制调整后权重和图时出错：{e}")
+
 if __name__ == "__main__":
     csv_file_path = 'csv/test_daily_weight.csv' 
     output_file = 'csv/adjusted_weights.csv'
@@ -97,3 +174,4 @@ if __name__ == "__main__":
         current_weights = adjuster.get_initial_weights()
         new_weights_over_days = adjuster.adjust_weights_over_days(current_weights, target_weights_list, codes_list)
         adjuster.save_adjusted_weights_to_csv(new_weights_over_days, output_file)
+        adjuster.plot_adjusted_weight_sums(new_weights_over_days)
