@@ -88,8 +88,8 @@ class PortfolioWeightAdjuster:
                         f.write(f'{time_value},{code},{weight}\n')
 
 if __name__ == "__main__":
-    csv_file_path = 'csv_folder/test_daily_weight.csv' 
-    output_file = 'csv_folder/adjusted_weights.csv'
+    csv_file_path = 'csv/test_daily_weight.csv' 
+    output_file = 'csv/adjusted_weights.csv'
     adjuster = PortfolioWeightAdjuster(csv_file_path)
 
     if adjuster.validate_weights_sum():

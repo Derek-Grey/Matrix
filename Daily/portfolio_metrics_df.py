@@ -211,7 +211,7 @@ def calculate_portfolio_metrics_df(weights_df, returns_df=None):
     
     # 保存结果
     output_prefix = 'minute' if is_minute else 'daily'
-    results.to_csv(f'csv_folder/test_{output_prefix}_portfolio_metrics_df.csv')
+    results.to_csv(f'csv/test_{output_prefix}_portfolio_metrics_df.csv')
     print(f"\n已保存{output_prefix}频投资组合指标数据，共 {len(results)} 行")
     
     return results
@@ -220,8 +220,8 @@ if __name__ == "__main__":
     # 测试代码
     try:
         print("\n=== 测试分钟频数据 ===")
-        weights_df = pd.read_csv('csv_folder/test_minute_weight.csv')
-        returns_df = pd.read_csv('csv_folder/test_minute_return.csv')
+        weights_df = pd.read_csv('csv/test_minute_weight.csv')
+        returns_df = pd.read_csv('csv/test_minute_return.csv')
         
         print("\n权重数据前几行:")
         print(weights_df.head())
@@ -234,7 +234,7 @@ if __name__ == "__main__":
         print(results.head())
         
         print("\n=== 测试日频数据 ===")
-        daily_weights = pd.read_csv('csv_folder/test_daily_weight.csv')
+        daily_weights = pd.read_csv('csv/test_daily_weight.csv')
         
         print("\n日频权重数据前几行:")
         print(daily_weights.head())

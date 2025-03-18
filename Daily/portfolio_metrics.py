@@ -334,7 +334,7 @@ class PortfolioMetrics:
 
 if __name__ == "__main__":
     checker = DataChecker()
-    weights = pd.read_csv('csv_folder/test_daily_weight.csv')
+    weights = pd.read_csv('csv/test_daily_weight.csv')
     checker.check_trading_dates(weights)
-    portfolio_metrics = PortfolioMetrics('csv_folder/test_daily_weight.csv')
+    portfolio_metrics = PortfolioMetrics('csv/test_daily_weight.csv')
     portfolio_metrics.calculate_portfolio_metrics() 

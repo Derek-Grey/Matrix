@@ -97,8 +97,8 @@ def generate_all_data(start_date='2024-01-02', end_date='2024-12-31',
         minute_end_date: 分钟频数据结束日期，默认为None，将使用一个月后的日期
     """
     # 创建目录
-    if not os.path.exists('csv_folder'):
-        os.makedirs('csv_folder')
+    if not os.path.exists('csv'):
+        os.makedirs('csv')
     
     # 设置分钟频数据的日期范围
     if minute_start_date is None:
@@ -157,10 +157,10 @@ def generate_all_data(start_date='2024-01-02', end_date='2024-12-31',
     minute_returns_df = pd.concat(minute_returns_data, ignore_index=True)
     
     # 保存到CSV
-    daily_weights_df.to_csv('csv_folder/test_daily_weight.csv', index=False)
-    daily_returns_df.to_csv('csv_folder/test_daily_return.csv', index=False)
-    minute_weights_df.to_csv('csv_folder/test_minute_weight.csv', index=False)
-    minute_returns_df.to_csv('csv_folder/test_minute_return.csv', index=False)
+    daily_weights_df.to_csv('csv/test_daily_weight.csv', index=False)
+    daily_returns_df.to_csv('csv/test_daily_return.csv', index=False)
+    minute_weights_df.to_csv('csv/test_minute_weight.csv', index=False)
+    minute_returns_df.to_csv('csv/test_minute_return.csv', index=False)
     
     print(f"已保存日频权重数据，共 {len(daily_weights_df)} 行")
     print(f"已保存日频收益率数据，共 {len(daily_returns_df)} 行")

@@ -7,37 +7,40 @@ import math
 import pandas as pd
 import numpy as np
 from loguru import logger
+from utils import trans_str_to_float64, get_client_U
 import plotly.graph_objects as go
 from pathlib import Path
 from functools import reduce, wraps
-from datetime import datetime
-
-# 导入自定义模块
+import multiprocessing as mp
+from settings import USELESS_INDUS, DB_U_MINUTE, END_MONTH
 from utils import trans_str_to_float64
-from db_client import get_client_U, get_client
-from settings import USELESS_INDUS
-from load_data import LoadData
+from functools import wraps
 
 # 设置项目根目录
 ROOT_DIR = Path(__file__).parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
-
-# 设置pandas选项
+from db_client import get_client
+from load_data import LoadData
+# 设置选择加入未来行为的选项
 pd.set_option('future.no_silent_downcasting', True)
 
-# 缓存装饰器
+# 定义缓存装饰器
 def cache_data(func):
-    """数据缓存装饰器"""
-    cache = None
+    cache = None  # 用于存储缓存数据
+
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         nonlocal cache
-        if cache is None:
+        if cache is None:  # 如果缓存为空，则调用原始函数
             cache = func(self, *args, **kwargs)
-        return cache
+        return cache  # 返回缓存数据
+
     return wrapper
 
+# %% 
+# 数据处理类
+# 定义对齐矩阵的函数
 def align_and_fill_matrix(target_matrix: pd.DataFrame, reference_matrix: pd.DataFrame) -> pd.DataFrame:
     """
     将目标矩阵与参考矩阵的列对齐，并用0填充缺失值
@@ -50,23 +53,16 @@ def align_and_fill_matrix(target_matrix: pd.DataFrame, reference_matrix: pd.Data
         aligned_matrix: 对齐后的矩阵
     """
     try:
+        # 重新索引目标矩阵，确保列与参考矩阵一致，缺失值填充为0
         aligned_matrix = target_matrix.reindex(columns=reference_matrix.columns, fill_value=0)
         return aligned_matrix
     except Exception as e:
         logger.error(f"对齐矩阵失败: {e}")
         raise
 
-@cache_data
+# 文件检查和时间范围的确认函数
+@cache_data  # 应用缓存装饰器
 def process_data(data_loader):
-    """
-    处理和对齐数据
-    
-    Args:
-        data_loader: LoadData实例
-        
-    Returns:
-        tuple: 包含对齐后的各种矩阵
-    """
     try:
         # 获取开始和结束日期
         start_date = pd.to_datetime(data_loader.date_s)
@@ -90,42 +86,46 @@ def process_data(data_loader):
         if raw_files_exist and aligned_files_exist:
             logger.debug('发现现有对齐数据文件，尝试加载...')
             try:
-                # 加载对齐文件
-                aligned_limit_matrix = pd.read_csv(os.path.join(data_loader.data_folder, 'aligned_limit_matrix.csv'), index_col=0, parse_dates=True)
-                
-                # 验证 aligned_limit_matrix 的时间范围
-                aligned_start_date = aligned_limit_matrix.index.min()
-                aligned_end_date = aligned_limit_matrix.index.max()
-                
-                if aligned_start_date <= start_date and aligned_end_date >= end_date:
-                    logger.debug('aligned_limit_matrix 的时间范围符合预设，加载对齐数据...')
-                    
-                    aligned_stocks_matrix = pd.read_csv(os.path.join(data_loader.data_folder, 'aligned_stocks_matrix.csv'), index_col=0, parse_dates=True)
-                    aligned_riskwarning_matrix = pd.read_csv(os.path.join(data_loader.data_folder, 'aligned_riskwarning_matrix.csv'), index_col=0, parse_dates=True)
-                    aligned_trade_status_matrix = pd.read_csv(os.path.join(data_loader.data_folder, 'aligned_trade_status_matrix.csv'), index_col=0, parse_dates=True)
-                    score_matrix = pd.read_csv(os.path.join(data_loader.data_folder, 'aligned_score_matrix.csv'),index_col=0, parse_dates=True)
-                    
-                    # 截取所需日期范围的数据
-                    date_mask = lambda df: (df.index >= start_date) & (df.index <= end_date)
-                    aligned_stocks_matrix = aligned_stocks_matrix[date_mask(aligned_stocks_matrix)]
-                    aligned_limit_matrix = aligned_limit_matrix[date_mask(aligned_limit_matrix)]
-                    aligned_riskwarning_matrix = aligned_riskwarning_matrix[date_mask(aligned_riskwarning_matrix)]
-                    aligned_trade_status_matrix = aligned_trade_status_matrix[date_mask(aligned_trade_status_matrix)]
-                    score_matrix = score_matrix[date_mask(score_matrix)]
+                # 读取原始文件的日期范围
+                wind_df = pd.read_csv(os.path.join(data_loader.data_folder, 'raw_wind_data.csv'))
+                wind_df['date'] = pd.to_datetime(wind_df['date'])
+                raw_start_date = wind_df['date'].min()
+                raw_end_date = wind_df['date'].max()
 
-                    return (aligned_stocks_matrix, aligned_limit_matrix, aligned_riskwarning_matrix, aligned_trade_status_matrix, score_matrix)
-
-                else:
-                    logger.warning('aligned_limit_matrix 的时间范围不符合预设')
-                    # 检查开始和结束日期是否在数据库中存在
-                    if not (data_loader.check_date_exists(start_date) and data_loader.check_date_exists(end_date)):
-                        logger.debug('开始和结束日期在数据库中不存在，加载本地文件...')
+                # 检查日期范围是否符合要求
+                if start_date >= raw_start_date and end_date <= raw_end_date:
+                    logger.debug('设定日期范围在原始文件日期范围内，加载对齐数据...')
+                    
+                    # 加载对齐文件
+                    aligned_limit_matrix = pd.read_csv(
+                        os.path.join(data_loader.data_folder, 'aligned_limit_matrix.csv'), 
+                        index_col=0, parse_dates=True
+                    )
+                    
+                    # 验证 aligned_limit_matrix 的时间范围
+                    aligned_start_date = aligned_limit_matrix.index.min()
+                    aligned_end_date = aligned_limit_matrix.index.max()
+                    if aligned_start_date <= start_date and aligned_end_date >= end_date:
+                        logger.debug('aligned_limit_matrix 的时间范围符合预设，加载对齐数据...')
+                        
                         # 尝试加载其他对齐文件
                         try:
-                            aligned_stocks_matrix = pd.read_csv(os.path.join(data_loader.data_folder, 'aligned_stocks_matrix.csv'), index_col=0, parse_dates=True)
-                            aligned_riskwarning_matrix = pd.read_csv(os.path.join(data_loader.data_folder, 'aligned_riskwarning_matrix.csv'), index_col=0, parse_dates=True)
-                            aligned_trade_status_matrix = pd.read_csv(os.path.join(data_loader.data_folder, 'aligned_trade_status_matrix.csv'), index_col=0, parse_dates=True)
-                            score_matrix = pd.read_csv(os.path.join(data_loader.data_folder, 'aligned_score_matrix.csv'),index_col=0, parse_dates=True)
+                            aligned_stocks_matrix = pd.read_csv(
+                                os.path.join(data_loader.data_folder, 'aligned_stocks_matrix.csv'), 
+                                index_col=0, parse_dates=True
+                            )
+                            aligned_riskwarning_matrix = pd.read_csv(
+                                os.path.join(data_loader.data_folder, 'aligned_riskwarning_matrix.csv'), 
+                                index_col=0, parse_dates=True
+                            )
+                            aligned_trade_status_matrix = pd.read_csv(
+                                os.path.join(data_loader.data_folder, 'aligned_trade_status_matrix.csv'), 
+                                index_col=0, parse_dates=True
+                            )
+                            score_matrix = pd.read_csv(
+                                os.path.join(data_loader.data_folder, 'aligned_score_matrix.csv'), 
+                                index_col=0, parse_dates=True
+                            )
                             
                             # 截取所需日期范围的数据
                             date_mask = lambda df: (df.index >= start_date) & (df.index <= end_date)
@@ -138,39 +138,44 @@ def process_data(data_loader):
                             return (aligned_stocks_matrix, aligned_limit_matrix,
                                     aligned_riskwarning_matrix, aligned_trade_status_matrix,
                                     score_matrix)
+
                         except Exception as e:
-                            logger.error(f"加载对齐文件失败: {e}")
+                            logger.warning(f"加载其他对齐数据失败: {e}")
+                            logger.debug("将重新生成对齐数据...")
+
                     else:
-                        logger.debug('开始和结束日期在数据库中存在，重新读取数据库...')
+                        logger.warning('aligned_limit_matrix 的时间范围不符合预设')
+                else:
+                    logger.warning('设定日期范围不在原始文件日期范围内')
 
             except Exception as e:
                 logger.warning(f"加载现有对齐数据失败: {e}")
                 logger.debug("将重新生成对齐数据...")
 
-                # 如果无法从现有文件加载，则重新生成数据
-                logger.debug('生成新的对齐数据...')
-                df_stocks, trade_status_matrix, riskwarning_matrix, limit_matrix = data_loader.get_stocks_info()
-                score_matrix = data_loader.generate_score_matrix('stra_V3_11.csv')
+        # 如果无法从现有文件加载，则重新生成数据
+        logger.debug('生成新的对齐数据...')
+        df_stocks, trade_status_matrix, riskwarning_matrix, limit_matrix = data_loader.get_stocks_info()
+        score_matrix = data_loader.generate_score_matrix('stra_V3_11.csv')
 
-                # 对齐数据
-                aligned_stocks_matrix = align_and_fill_matrix(df_stocks, score_matrix)
-                aligned_limit_matrix = align_and_fill_matrix(limit_matrix, score_matrix)
-                aligned_riskwarning_matrix = align_and_fill_matrix(riskwarning_matrix, score_matrix)
-                aligned_trade_status_matrix = align_and_fill_matrix(trade_status_matrix, score_matrix)
+        # 对齐数据
+        aligned_stocks_matrix = align_and_fill_matrix(df_stocks, score_matrix)
+        aligned_limit_matrix = align_and_fill_matrix(limit_matrix, score_matrix)
+        aligned_riskwarning_matrix = align_and_fill_matrix(riskwarning_matrix, score_matrix)
+        aligned_trade_status_matrix = align_and_fill_matrix(trade_status_matrix, score_matrix)
 
-                # 保存对齐后的矩阵
-                for matrix, filename in [
-                    (aligned_stocks_matrix, 'aligned_stocks_matrix.csv'),
-                    (aligned_limit_matrix, 'aligned_limit_matrix.csv'),
-                    (aligned_riskwarning_matrix, 'aligned_riskwarning_matrix.csv'),
-                    (aligned_trade_status_matrix, 'aligned_trade_status_matrix.csv'),
-                    (score_matrix, 'aligned_score_matrix.csv')
-                ]:
-                    matrix.to_csv(os.path.join(data_loader.data_folder, filename))
+        # 保存对齐后的矩阵
+        for matrix, filename in [
+            (aligned_stocks_matrix, 'aligned_stocks_matrix.csv'),
+            (aligned_limit_matrix, 'aligned_limit_matrix.csv'),
+            (aligned_riskwarning_matrix, 'aligned_riskwarning_matrix.csv'),
+            (aligned_trade_status_matrix, 'aligned_trade_status_matrix.csv'),
+            (score_matrix, 'aligned_score_matrix.csv')
+        ]:
+            matrix.to_csv(os.path.join(data_loader.data_folder, filename))
 
-                return (aligned_stocks_matrix, aligned_limit_matrix,
-                        aligned_riskwarning_matrix, aligned_trade_status_matrix,
-                        score_matrix)
+        return (aligned_stocks_matrix, aligned_limit_matrix,
+                aligned_riskwarning_matrix, aligned_trade_status_matrix,
+                score_matrix)
 
     except Exception as e:
         logger.error(f"数据处理失败: {e}")
@@ -784,7 +789,7 @@ def run_strategy(backtest, strategy_name, hold_count, rebalance_frequency, df_mv
 # 主函数
 def main(start_date="2010-08-02", end_date="2020-07-31", 
          hold_count=50, rebalance_frequency=1,
-         data_directory='data', output_directory='output',
+         data_directory='csv', output_directory='output',
          run_fixed=True, run_dynamic=True):
     """
     主函数，执行回测策略
@@ -841,9 +846,9 @@ def main(start_date="2010-08-02", end_date="2020-07-31",
 
 if __name__ == "__main__":
     # 统一设置回测参数
-    start_date = "2015-01-5"
-    end_date = "2023-12-29"
-    A_workplace_data = r"Daily\A_workplace_data"
+    start_date = "2015-01-01"
+    end_date = "2024-01-01"
+    A_workplace_data = "csv"  # 使用相对路径
 
     ld = LoadData(
         date_s=start_date,
@@ -862,7 +867,7 @@ if __name__ == "__main__":
         'end_date': end_date,        # 回测结束日期
         'hold_count': 50,            # 持仓数量
         'rebalance_frequency': 1,    # 每天再平衡
-        'data_directory': 'data',    # 数据目录
+        'data_directory': 'csv',     # 数据目录
         'output_directory': 'output', # 输出目录
         'run_fixed': True,           # 运行固定持仓策略
         'run_dynamic': True          # 运行动态持仓策略

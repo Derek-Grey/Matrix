@@ -14,8 +14,7 @@ from functools import reduce
 import multiprocessing as mp
 from loguru import logger
 from settings import USELESS_INDUS, DB_U_MINUTE, END_MONTH
-from Utils.utils import trans_str_to_float64
-from Utils.db import get_trading_days
+from utils import trans_str_to_float64
 from db_client import get_client_U, get_client
 from Utils.my_errors import LogExceptions
 from datetime import datetime
@@ -29,8 +28,6 @@ pd.set_option('display.unicode.east_asian_width', True)
 pd.set_option('expand_frame_repr', False)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.precision', 14)
-
-
 
 def merge_pct_data(start_date_1, end_date_1, start_date_2, end_date_2):
     
@@ -58,8 +55,6 @@ def merge_pct_data(start_date_1, end_date_1, start_date_2, end_date_2):
     # 将两个DataFrame拼接起来
     edg_data = pd.concat([df_ic,df_1_filtered, df_2_filtered])
     return edg_data
-
-
 
 
 def merge_signal(start_date_1,end_date_1,start_date_2,end_date_2):
