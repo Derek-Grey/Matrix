@@ -2,6 +2,7 @@ import sys
 import os
 import pandas as pd
 import numpy as np
+import time
 from db_client import get_client_U
 from urllib.parse import quote_plus
 
@@ -200,12 +201,9 @@ class DataChecker:
     def check_trading_dates(self, df):
         """检查数据是否包含非交易日"""
         dates = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d').unique()
-        print("\n=== 检查日期信息 ===\n待检查的日期:", dates)
         invalid_dates = [d for d in dates if d not in self.trading_dates]
         if invalid_dates:
-            print("交易日集合中包含的部分日期:", sorted(list(self.trading_dates))[-10:])
             raise ValueError(f"数据包含非交易日: {invalid_dates}")
-        print("=================\n")
 
 class PortfolioMetrics:
     def __init__(self, weight_file, return_file=None, use_equal_weights=True):
@@ -220,74 +218,108 @@ class PortfolioMetrics:
 
     def prepare_data(self):
         """为投资组合指标计算准备数据。"""
-        self.weights = pd.read_csv(self.weight_file)
-        self._validate_weights()
-        self.returns = self._fetch_returns()
-        self._validate_returns()
-        self._set_index_columns()
+        start_time = time.time()
+        
+        # 读取并转换权重数据
+        weights_df = pd.read_csv(self.weight_file)
+        self._validate_weights(weights_df)
+        
+        # 获取收益率数据
+        returns_df = self._fetch_returns(weights_df)
+        
+        # 转换为numpy数组
+        self.dates, self.codes, self.weights_arr, self.returns_arr = self._convert_to_arrays(weights_df, returns_df)
+        
+        # 设置数据频率标志
+        self.is_minute = 'time' in weights_df.columns
+        
+        print(f"数据准备总耗时: {time.time() - start_time:.2f}秒\n")
 
-    def _validate_weights(self):
+    def _validate_weights(self, weights_df):
         """验证权重数据"""
         required_weight_columns = ['date', 'code']
-        missing_weight_columns = [col for col in required_weight_columns if col not in self.weights.columns]
+        missing_weight_columns = [col for col in required_weight_columns if col not in weights_df.columns]
         if missing_weight_columns:
             raise ValueError(f"权重表缺少必要的列: {missing_weight_columns}")
 
-    def _fetch_returns(self):
+    def _fetch_returns(self, weights_df):
         """从文件或数据库获取收益率数据"""
         if self.return_file is None:
             print("\n未提供收益率数据文件，将从数据库获取收益率数据...")
-            unique_dates = self.weights['date'].unique()
-            unique_codes = self.weights['code'].unique()
+            unique_dates = weights_df['date'].unique()
+            unique_codes = weights_df['code'].unique()
             returns = self.get_returns_from_db(unique_dates, unique_codes)
             print(f"成功从数据库获取了 {len(returns)} 条收益率记录")
             return returns
         else:
             return pd.read_csv(self.return_file)
 
-    def _validate_returns(self):
-        """验证收益率数据"""
-        required_return_columns = ['return']
-        missing_return_columns = [col for col in required_return_columns if col not in self.returns.columns]
-        if missing_return_columns:
-            raise ValueError(f"收益率表缺少必要的列: {missing_return_columns}")
-
-    def _set_index_columns(self):
-        """根据数据频率设置索引列"""
-        self.is_minute = 'time' in self.weights.columns
-        if self.is_minute:
-            self.weights['datetime'] = pd.to_datetime(self.weights['date'] + ' ' + self.weights['time'])
-            self.returns['datetime'] = pd.to_datetime(self.returns['date'] + ' ' + self.returns['time'])
-            self.index_cols = ['datetime', 'code']
+    def _convert_to_arrays(self, weights_df, returns_df):
+        """将DataFrame转换为numpy数组，并处理等权重"""
+        # 获取唯一的日期和股票代码
+        dates = weights_df['date'].unique()
+        codes = weights_df['code'].unique()
+        
+        # 创建空的权重和收益率矩阵
+        n_dates = len(dates)
+        n_codes = len(codes)
+        weights_arr = np.zeros((n_dates, n_codes))
+        returns_arr = np.zeros((n_dates, n_codes))
+        
+        # 创建日期和代码的映射字典以加速查找
+        date_idx = {date: i for i, date in enumerate(dates)}
+        code_idx = {code: i for i, code in enumerate(codes)}
+        
+        # 填充权重矩阵
+        if 'weight' in weights_df.columns:
+            for _, row in weights_df.iterrows():
+                i = date_idx[row['date']]
+                j = code_idx[row['code']]
+                weights_arr[i, j] = row['weight']
         else:
-            self.weights['date'] = pd.to_datetime(self.weights['date'])
-            self.returns['date'] = pd.to_datetime(self.returns['date'])
-            self.index_cols = ['date', 'code']
-        self._apply_equal_weights()
-
-    def _apply_equal_weights(self):
-        """如果需要，应用等权重"""
-        if 'weight' not in self.weights.columns:
+            # 使用等权重
             if self.use_equal_weights:
                 print("权重列缺失，使用等权重")
-                self.weights['weight'] = 1.0 / self.weights.groupby(self.index_cols[0])['code'].transform('count')
+                weights_per_date = 1.0 / weights_df.groupby('date')['code'].transform('count').values
+                for idx, row in weights_df.iterrows():
+                    i = date_idx[row['date']]
+                    j = code_idx[row['code']]
+                    weights_arr[i, j] = weights_per_date[idx]
             else:
                 raise ValueError("权重列缺失，且未设置使用等权重")
+        
+        # 填充收益率矩阵
+        for _, row in returns_df.iterrows():
+            i = date_idx[row['date']]
+            j = code_idx[row['code']]
+            returns_arr[i, j] = row['return']
+        
+        return dates, codes, weights_arr, returns_arr
 
     def get_returns_from_db(self, dates, codes):
         """从数据库获取收益率数据"""
+        start_time = time.time()
         try:
             client = get_client_U('r')
             returns_data = []
+            
+            # 查询数据
             for date in dates:
                 query = {"date": date, "code": {"$in": list(codes)}}
                 daily_returns = list(client.basic_wind.w_vol_price.find(query, {"_id": 0, "code": 1, "pct_chg": 1, "date": 1}))
                 for record in daily_returns:
                     returns_data.append({'date': record['date'], 'code': record['code'], 'return': float(record['pct_chg']) / 100})
-            client.close()
+
+            # 转换为DataFrame
             returns = pd.DataFrame(returns_data)
+            
+            # 验证数据
             self._validate_fetched_returns(returns, dates, codes)
+            
+            client.close()
+            print(f"获取收益率数据总耗时: {time.time() - start_time:.2f}秒\n")
             return returns
+            
         except Exception as e:
             raise Exception(f"从数据库获取收益率数据时出错: {str(e)}")
 
@@ -304,32 +336,64 @@ class PortfolioMetrics:
 
     def calculate_portfolio_metrics(self):
         """计算投资组合收益率和换手率"""
-        weights_wide = self.weights.pivot(index=self.index_cols[0], columns='code', values='weight')
-        returns_wide = self.returns.pivot(index=self.index_cols[0], columns='code', values='return')
-        portfolio_returns = (weights_wide * returns_wide).sum(axis=1)
-        turnover = self._calculate_turnover(weights_wide, returns_wide)
-        self._save_results(portfolio_returns, turnover)
+        start_time = time.time()
+        
+        # 计算组合收益率
+        portfolio_returns = np.sum(self.weights_arr * self.returns_arr, axis=1)
+
+        # 计算换手率
+        turnover = self._calculate_turnover(self.weights_arr, self.returns_arr)
+        
+        # 保存结果
+        self._save_results_array(self.dates, portfolio_returns, turnover)
+        
+        print(f"计算指标总耗时: {time.time() - start_time:.2f}秒\n")
         return portfolio_returns, turnover
 
-    def _calculate_turnover(self, weights_wide, returns_wide):
-        """计算换手率"""
-        weights_shift = weights_wide.shift(1)
-        turnover = pd.Series(index=weights_wide.index)
-        turnover.iloc[0] = weights_wide.iloc[0].abs().sum()
-        for i in range(1, len(weights_wide)):
-            curr_weights = weights_wide.iloc[i]
-            prev_weights = weights_wide.iloc[i-1]
-            returns_t = returns_wide.iloc[i-1]
-            theoretical_weights = prev_weights * (1 + returns_t)
-            theoretical_weights = theoretical_weights / theoretical_weights.sum()
-            turnover.iloc[i] = np.abs(curr_weights - theoretical_weights).sum() / 2
+    def _calculate_turnover(self, weights_arr, returns_arr):
+        """计算换手率
+        
+        Args:
+            weights_arr: numpy.ndarray, 权重矩阵
+            returns_arr: numpy.ndarray, 收益率矩阵
+        
+        Returns:
+            numpy.ndarray: 换手率序列
+        """
+        n_periods = len(weights_arr)
+        turnover = np.zeros(n_periods)
+        
+        # 第一期换手率就是权重之和
+        turnover[0] = np.sum(np.abs(weights_arr[0]))
+        
+        # 计算后续期间的换手率
+        for i in range(1, n_periods):
+            # 获取当前权重和前一期权重
+            curr_weights = weights_arr[i]
+            prev_weights = weights_arr[i-1]
+            prev_returns = returns_arr[i-1]
+            
+            # 计算理论权重
+            theoretical_weights = prev_weights * (1 + prev_returns)
+            theoretical_weights = theoretical_weights / np.sum(theoretical_weights)
+            
+            # 计算换手率
+            turnover[i] = np.sum(np.abs(curr_weights - theoretical_weights)) / 2
+        
         return turnover
 
-    def _save_results(self, portfolio_returns, turnover):
+    def _save_results_array(self, dates, portfolio_returns, turnover):
         """将结果保存到CSV文件"""
-        results = pd.DataFrame({'portfolio_return': portfolio_returns, 'turnover': turnover})
         output_prefix = 'minute' if self.is_minute else 'daily'
-        results.to_csv(f'output/test_{output_prefix}_portfolio_metrics.csv')
+        results = np.column_stack((dates, portfolio_returns, turnover))
+        np.savetxt(
+            f'output/test_{output_prefix}_portfolio_metrics.csv',
+            results,
+            delimiter=',',
+            header='date,portfolio_return,turnover',
+            fmt=['%s', '%.6f', '%.6f'],
+            comments=''
+        )
         print(f"已保存{output_prefix}频投资组合指标数据，共 {len(results)} 行")
 
 if __name__ == "__main__":
