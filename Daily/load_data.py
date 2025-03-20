@@ -21,6 +21,7 @@ from datetime import datetime
 from functools import wraps
 import numpy as np
 # from BackTest.hedge_final_extra import Edg
+from Daily.db_client import client_u
 
 mp.log_to_stderr()
 pd.set_option('display.unicode.ambiguous_as_wide', True)
@@ -808,3 +809,60 @@ if __name__ == '__main__':
     # xx = LoadDataMargin(date_s='2023-01-01', date_e='2024-01-31')
     # xx.get_stocks_info()
     # df = xx.get_stra_res(c_from='neo', db_name='strategy', table_name='stocks_list')
+
+def load_limit_data(date_s, date_e):
+    """
+    从MongoDB加载指定日期范围的涨跌停数据
+    
+    Args:
+        date_s (str): 起始日期，格式 'YYYY-MM-DD'
+        date_e (str): 结束日期，格式 'YYYY-MM-DD'
+        
+    Returns:
+        pd.DataFrame: 包含涨跌停信息的DataFrame，索引为[date, code]
+    """
+    t_limit = client_u.basic_jq.jq_daily_price_none
+    use_cols = {"_id": 0, "date": 1, "code": 1, "close": 1, "high_limit": 1, "low_limit": 1}
+    
+    # 从MongoDB获取数据
+    df_limit = pd.DataFrame(
+        t_limit.find(
+            {"date": {"$gte": date_s, "$lte": date_e}}, 
+            use_cols, 
+            batch_size=3000000
+        )
+    )
+    
+    if df_limit.empty:
+        return None
+        
+    # 设置多重索引
+    df_limit.set_index(['date', 'code'], inplace=True)
+    
+    # 计算涨跌停状态
+    df_limit['limit'] = df_limit.apply(
+        lambda x: (x["close"] == x["high_limit"]) or (x["close"] == x["low_limit"]), 
+        axis=1
+    )
+    df_limit['limit'] = df_limit['limit'].astype('int')
+    
+    return df_limit[['limit']]
+
+def load_data(date_s=None, date_e=None, rt=False):
+    """
+    加载指定日期范围的数据
+    
+    Args:
+        date_s (str): 起始日期，格式 'YYYY-MM-DD'
+        date_e (str): 结束日期，格式 'YYYY-MM-DD'
+        rt (bool): 是否加载涨跌停数据
+        
+    Returns:
+        pd.DataFrame: 包含请求数据的DataFrame
+    """
+    if rt:
+        if not date_s or not date_e:
+            raise ValueError("必须提供起始和结束日期")
+        return load_limit_data(date_s, date_e)
+    
+    # ... 其他数据加载逻辑 ...
