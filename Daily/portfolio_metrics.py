@@ -383,8 +383,10 @@ class PortfolioMetrics:
         return turnover
 
     def _save_results_array(self, dates, portfolio_returns, turnover):
-        """将结果保存到CSV文件"""
+        """将结果保存到CSV文件和NPY文件"""
         output_prefix = 'minute' if self.is_minute else 'daily'
+        
+        # 保存CSV格式
         results = np.column_stack((dates, portfolio_returns, turnover))
         np.savetxt(
             f'output/test_{output_prefix}_portfolio_metrics.csv',
@@ -394,11 +396,21 @@ class PortfolioMetrics:
             fmt=['%s', '%.6f', '%.6f'],
             comments=''
         )
+        
+        # 保存NPY格式
+        np_results = {
+            'dates': np.array(dates),
+            'portfolio_returns': portfolio_returns,
+            'turnover': turnover
+        }
+        np.save(f'output/test_{output_prefix}_portfolio_metrics.npy', np_results)
+        
         print(f"已保存{output_prefix}频投资组合指标数据，共 {len(results)} 行")
+        print(f"数据已同时保存为 CSV 和 NPY 格式")
 
 if __name__ == "__main__":
     checker = DataChecker()
     weights = pd.read_csv('csv/test_daily_weight.csv')
     checker.check_trading_dates(weights)
     portfolio_metrics = PortfolioMetrics('csv/test_daily_weight.csv')
-    portfolio_metrics.calculate_portfolio_metrics() 
+    portfolio_metrics.calculate_portfolio_metrics()
