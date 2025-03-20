@@ -20,7 +20,6 @@ from Utils.my_errors import LogExceptions
 from datetime import datetime
 from functools import wraps
 import numpy as np
-# from BackTest.hedge_final_extra import Edg
 from Daily.db_client import client_u
 
 mp.log_to_stderr()
@@ -58,23 +57,21 @@ def merge_pct_data(start_date_1, end_date_1, start_date_2, end_date_2):
     return edg_data
 
 
-def merge_signal(start_date_1,end_date_1,start_date_2,end_date_2):
-    xx = Edg(index_code="000905.SH",dates='2009-01-01',logger_display=False)
-    df_1 = xx.cal_hedge_init(show=False)
-    df_1.reset_index(inplace=True)
-    # 筛选第一个文件的指定日期范围数据
-    df_1_filtered = df_1.query(f"date >= @start_date_1 and date <= @end_date_1")
-
-    xxf = Edg(index_code="000852.SH",dates='2009-01-01',logger_display=True)
-    df_2 = xxf.cal_hedge_init(show=False)
-    df_2.reset_index(inplace=True)
-
-    # 筛选第二个文件的指定日期范围数据
-    df_2_filtered = df_2.query(f"date >= @start_date_2 and date <= @end_date_2")
-
-    # 将两个DataFrame拼接起来
-    edg_data = pd.concat([df_1_filtered, df_2_filtered])
-    return edg_data
+def merge_signal(start_date_1, end_date_1, start_date_2, end_date_2):
+    """合并信号数据"""
+    # 删除 Edg 相关代码
+    t_ic = get_client_U(m='r')['basic_wind']['w_bench'] 
+    df_1 = pd.DataFrame(t_ic.find(
+        {'date': {'$gte': start_date_1, '$lte': end_date_1}},
+        {'_id': 0, 'date': 1, 'close': 1, 'pct_chg': 1}
+    )).set_index('date')
+    
+    df_2 = pd.DataFrame(t_ic.find(
+        {'date': {'$gte': start_date_2, '$lte': end_date_2}},
+        {'_id': 0, 'date': 1, 'close': 1, 'pct_chg': 1}
+    )).set_index('date')
+    
+    return pd.concat([df_1, df_2]).reset_index()
 
 
 def proc_minute_chg_info(year: int, rt=False, time: str = '11:30:00'):
