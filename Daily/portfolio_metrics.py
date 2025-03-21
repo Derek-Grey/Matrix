@@ -207,13 +207,20 @@ class DataChecker:
 
 class PortfolioMetrics:
     def __init__(self, weight_file, return_file=None, use_equal_weights=True):
+        """初始化投资组合指标计算器
+        
+        Args:
+            weight_file (str): 权重文件路径，必须包含 'date' 和 'code' 列，可选包含 'weight' 列
+            return_file (str, optional): 收益率文件路径。如果为None，将从数据库获取收益率数据
+            use_equal_weights (bool): 当权重文件不包含 'weight' 列时，是否使用等权重。默认为True
+        """
         self.weight_file = weight_file
         self.return_file = return_file
         self.use_equal_weights = use_equal_weights
-        self.weights = None
-        self.returns = None
-        self.index_cols = None
-        self.is_minute = None
+        self.weights = None  # 存储权重数据
+        self.returns = None  # 存储收益率数据
+        self.index_cols = None  # 存储索引列
+        self.is_minute = None  # 标记是否为分钟频数据
         self.prepare_data()
 
     def prepare_data(self):
@@ -353,12 +360,19 @@ class PortfolioMetrics:
     def _calculate_turnover(self, weights_arr, returns_arr):
         """计算换手率
         
+        计算方法：
+        1. 第一期换手率为权重绝对值之和
+        2. 后续期间：
+           a. 计算理论权重（前一期权重考虑收益率变化后的权重）
+           b. 计算当前实际权重与理论权重的差异
+           c. 换手率 = 差异绝对值之和 / 2
+        
         Args:
-            weights_arr: numpy.ndarray, 权重矩阵
-            returns_arr: numpy.ndarray, 收益率矩阵
+            weights_arr (numpy.ndarray): 权重矩阵，形状为 (n_periods, n_stocks)
+            returns_arr (numpy.ndarray): 收益率矩阵，形状为 (n_periods, n_stocks)
         
         Returns:
-            numpy.ndarray: 换手率序列
+            numpy.ndarray: 换手率序列，长度为 n_periods
         """
         n_periods = len(weights_arr)
         turnover = np.zeros(n_periods)
@@ -383,7 +397,21 @@ class PortfolioMetrics:
         return turnover
 
     def _save_results_array(self, dates, portfolio_returns, turnover):
-        """将结果保存到CSV文件和NPY文件"""
+        """将结果保存到CSV文件和NPY文件
+        
+        保存格式：
+        1. CSV文件：包含日期、组合收益率和换手率三列
+        2. NPY文件：包含日期数组、组合收益率数组和换手率数组的字典
+        
+        保存路径：
+        - CSV: output/test_{频率}_portfolio_metrics.csv
+        - NPY: output/test_{频率}_portfolio_metrics.npy
+        
+        Args:
+            dates (array-like): 日期序列
+            portfolio_returns (numpy.ndarray): 组合收益率序列
+            turnover (numpy.ndarray): 换手率序列
+        """
         output_prefix = 'minute' if self.is_minute else 'daily'
         
         # 保存CSV格式

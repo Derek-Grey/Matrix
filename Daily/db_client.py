@@ -51,3 +51,6 @@ def get_client_U(m='r'):
             '192.168.1.99:29900/'
         )
     )
+
+# 创建默认的只读客户端实例
+client_u = get_client_U(m='r')

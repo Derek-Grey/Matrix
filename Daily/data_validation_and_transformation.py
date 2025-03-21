@@ -374,10 +374,10 @@ if __name__ == "__main__":
     # CSV文件路径
     csv_file_path = 'csv/test_daily_weight.csv'
     
-    # 将CSV转换为NumPy格式
-    print("开始转换CSV数据到NumPy格式...")
-    weights_array, dates, codes = PortfolioWeightAdjuster.csv_to_numpy(csv_file_path)
-    print(f"数据转换完成，shape: {weights_array.shape}")
+    # 使用load_data方法加载CSV数据
+    print("开始加载CSV数据...")
+    weights_array, dates, codes = PortfolioWeightAdjuster.load_data(csv_file_path, source_type='csv')
+    print(f"数据加载完成，shape: {weights_array.shape}")
     
     # 创建调整器并执行调整
     adjuster = PortfolioWeightAdjuster(weights_array, dates, codes)
