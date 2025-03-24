@@ -369,29 +369,30 @@ def print_numpy_info(data, name="数组"):
     print("-" * 50)
 
 if __name__ == "__main__":
-    total_start_time = time_module.time()
+    from pathlib import Path  # 添加缺失的模块导入
+
+    # 交互式参数输入
+    source_type = input("请输入数据源类型 [csv/numpy] (默认csv): ") or 'csv'
+    change_limit = float(input("请输入单日调整上限 (默认0.05): ") or 0.05)
     
-    # CSV文件路径
-    csv_file_path = 'csv/test_daily_weight.csv'
-    
-    # 使用load_data方法加载CSV数据
-    print("开始加载CSV数据...")
-    weights_array, dates, codes = PortfolioWeightAdjuster.load_data(csv_file_path, source_type='csv')
-    print(f"数据加载完成，shape: {weights_array.shape}")
-    
-    # 创建调整器并执行调整
-    adjuster = PortfolioWeightAdjuster(weights_array, dates, codes)
+    if source_type == 'csv':
+        csv_path = input("请输入CSV文件路径 (默认csv/test_daily_weight.csv): ") or 'csv/test_daily_weight.csv'
+        data_source = str(Path(__file__).parent.parent / csv_path)
+    else:
+        numpy_path = input("请输入numpy文件路径 (默认adjusted_weights.npy): ") or 'adjusted_weights.npy'
+        data_dict = np.load(numpy_path, allow_pickle=True).item()
+        data_source = {
+            'weights': data_dict['weights'],
+            'dates': data_dict['dates'],
+            'codes': data_dict['codes']
+        }
+
+    # 自动执行全流程
+    weights_array, dates, codes = PortfolioWeightAdjuster.load_data(data_source, source_type)
+    adjuster = PortfolioWeightAdjuster(weights_array, dates, codes, change_limit)
     
     if adjuster.validate_weights_sum():
-        adjusted_weights = adjuster.adjust_weights_over_days()
-        adjuster.plot_adjusted_weight_sums(adjusted_weights)
-        
-        # 保存结果
-        output_file = 'adjusted_weights.npy'
-        np.save(output_file, adjusted_weights)
-        print(f"调整后的权重已保存到: {output_file}")
-        
-        # 打印数组信息
-        print_numpy_info(adjusted_weights, "调整后的权重数组")
-        
-    print(f"\n总耗时: {time_module.time() - total_start_time:.2f}秒")
+        adjusted = adjuster.adjust_weights_over_days()
+        adjuster.plot_adjusted_weight_sums(adjusted)
+        np.save('adjusted_weights.npy', adjusted)
+        print("运行结果已保存到 adjusted_weights.npy")

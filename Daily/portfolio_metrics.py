@@ -437,8 +437,31 @@ class PortfolioMetrics:
         print(f"数据已同时保存为 CSV 和 NPY 格式")
 
 if __name__ == "__main__":
+    from pathlib import Path
+    
+    # 交互式参数输入
+    print("=== 投资组合指标计算器 ===")
+    weight_path = input("请输入权重文件路径 (默认csv/test_daily_weight.csv): ") or 'csv/test_daily_weight.csv'
+    use_equal = input("是否使用等权重？[y/n] (默认y): ").lower() or 'y'
+    return_file = input("请输入收益率文件路径（留空则从数据库获取）: ") or None
+
+    # 处理路径解析
+    abs_weight_path = str(Path(__file__).parent.parent / weight_path)
+    
+    # 初始化检查器
     checker = DataChecker()
-    weights = pd.read_csv('csv/test_daily_weight.csv')
+    
+    # 加载并检查权重数据
+    weights = pd.read_csv(abs_weight_path)
     checker.check_trading_dates(weights)
-    portfolio_metrics = PortfolioMetrics('csv/test_daily_weight.csv')
-    portfolio_metrics.calculate_portfolio_metrics()
+    
+    # 初始化组合指标计算器
+    portfolio = PortfolioMetrics(
+        weight_file=abs_weight_path,
+        return_file=return_file,
+        use_equal_weights=use_equal == 'y'
+    )
+    
+    # 执行计算并保存结果
+    returns, turnover = portfolio.calculate_portfolio_metrics()
+    print(f"\n计算完成！结果已保存至 output/ 目录")
