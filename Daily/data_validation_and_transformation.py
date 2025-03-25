@@ -368,8 +368,8 @@ def print_numpy_info(data, name="数组"):
     print(f"描述性统计:\n{np.nanmean(data)=:.4f}\n{np.nanstd(data)=:.4f}")
     print("-" * 50)
 
-if __name__ == "__main__":
-    from pathlib import Path  # 添加缺失的模块导入
+def main():
+    from pathlib import Path
 
     # 交互式参数输入
     source_type = input("请输入数据源类型 [csv/numpy] (默认csv): ") or 'csv'
@@ -380,12 +380,26 @@ if __name__ == "__main__":
         data_source = str(Path(__file__).parent.parent / csv_path)
     else:
         numpy_path = input("请输入numpy文件路径 (默认adjusted_weights.npy): ") or 'adjusted_weights.npy'
-        data_dict = np.load(numpy_path, allow_pickle=True).item()
-        data_source = {
-            'weights': data_dict['weights'],
-            'dates': data_dict['dates'],
-            'codes': data_dict['codes']
-        }
+        loaded_data = np.load(numpy_path, allow_pickle=True)
+        
+        # 兼容新旧两种数据格式
+        if isinstance(loaded_data, np.ndarray):
+            print("检测到旧版numpy格式，自动转换...")
+            # 从原始数据加载dates和codes
+            csv_backup = input("请提供原始CSV文件路径以获取日期和代码信息: ") or 'csv/test_daily_weight.csv'
+            _, backup_dates, backup_codes = PortfolioWeightAdjuster._from_csv(
+                str(Path(__file__).parent.parent / csv_backup)
+            )
+            
+            data_source = {
+                'weights': loaded_data,
+                'dates': backup_dates,
+                'codes': backup_codes
+            }
+        elif isinstance(loaded_data, dict):
+            data_source = loaded_data
+        else:
+            raise ValueError("numpy文件格式无效，必须包含字典或权重数组")
 
     # 自动执行全流程
     weights_array, dates, codes = PortfolioWeightAdjuster.load_data(data_source, source_type)
@@ -394,5 +408,63 @@ if __name__ == "__main__":
     if adjuster.validate_weights_sum():
         adjusted = adjuster.adjust_weights_over_days()
         adjuster.plot_adjusted_weight_sums(adjusted)
-        np.save('adjusted_weights.npy', adjusted)
-        print("运行结果已保存到 adjusted_weights.npy")
+        # 在结果保存处增加必要信息
+        if adjuster.validate_weights_sum():
+            adjusted_weights = adjuster.adjust_weights_over_days()
+            adjuster.plot_adjusted_weight_sums(adjusted_weights)
+            
+            # 保存完整数据集
+            output_data = {
+                'weights': adjusted_weights,
+                'dates': dates,
+                'codes': codes
+            }
+            np.save('adjusted_weights.npy', output_data)
+            print(f"调整后的权重已保存到: adjusted_weights.npy")
+
+# 新增编程式调用接口
+def adjust_weights(source_type='csv', data_source=None, change_limit=0.05, output_path='adjusted_weights.npy'):
+    """
+    编程式调用接口
+    
+    Args:
+        source_type: 数据源类型 ['csv'/'numpy']
+        data_source: 数据源路径（CSV文件路径或numpy字典路径）
+        change_limit: 单日调整上限
+        output_path: 结果保存路径
+    
+    Returns:
+        dict: 包含调整后的权重、日期、代码的字典
+    """
+    from pathlib import Path
+    
+    # 加载数据
+    if source_type == 'csv':
+        abs_path = str(Path(__file__).parent.parent / data_source)
+        weights, dates, codes = PortfolioWeightAdjuster.load_data(abs_path, 'csv')
+    else:
+        loaded = np.load(data_source, allow_pickle=True)
+        if isinstance(loaded, np.ndarray):
+            # 旧格式需要原始CSV路径
+            csv_path = str(Path(__file__).parent.parent / 'csv/test_daily_weight.csv')
+            _, dates, codes = PortfolioWeightAdjuster._from_csv(csv_path)
+            data_dict = {'weights': loaded, 'dates': dates, 'codes': codes}
+        else:
+            data_dict = loaded.item() if isinstance(loaded, np.ndarray) else loaded
+        weights, dates, codes = PortfolioWeightAdjuster.load_data(data_dict, 'numpy')
+    
+    # 执行调整
+    adjuster = PortfolioWeightAdjuster(weights, dates, codes, change_limit)
+    if adjuster.validate_weights_sum():
+        adjusted = adjuster.adjust_weights_over_days()
+        output_data = {
+            'weights': adjusted,
+            'dates': dates,
+            'codes': codes
+        }
+        np.save(output_path, output_data)
+        return output_data
+    return None
+
+if __name__ == "__main__":
+    main()

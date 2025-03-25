@@ -346,18 +346,23 @@ class LoadData:
 
     def get_hold_num(self, hold_num=50, start_sorted=100, the_end_month=None, fixed_by_month=True):
         """
-        :param hold_num:
-        :param start_sorted:
-        :param the_end_month: 指定这个月起 start_sorted 为对应值，后面就不变了
-        :param fixed_by_month:用这个月去固定 the_end_month 的持仓数量是否不变(固定为指定的hold_num)
-        :return: set_index('month') df[['hold_s', 'hold_num']]
+        :param the_end_month: 指定这个月起 start_sorted 为对应值
         """
         df = self._get_dynamic_nums()
+        
+        # 添加月份校验
+        if the_end_month and the_end_month not in df.index:
+            available_months = df.index.tolist()
+            raise ValueError(
+                f"指定的结束月份 {the_end_month} 不存在于数据中\n"
+                f"可用月份范围: {min(available_months)} 至 {max(available_months)}"
+            )
+            
         if the_end_month is None:
             the_end_count = df.iloc[-1]['count']
         else:
             the_end_count = df.loc[the_end_month]['count']
-
+        
         df['hold_s'] = (df['count'] * (start_sorted / the_end_count)).apply(lambda x: math.floor(x))
         df['hold_e'] = (df['count'] * ((start_sorted + hold_num) / the_end_count)).apply(lambda x: math.floor(x))
         df['hold_num'] = df.hold_e - df.hold_s
@@ -846,8 +851,8 @@ def main(start_date="2010-08-02", end_date="2020-07-31",
 
 if __name__ == "__main__":
     # 统一设置回测参数
-    start_date = "2015-01-01"
-    end_date = "2024-01-01"
+    start_date = "2025-01-01"
+    end_date = "2025-01-31"
     A_workplace_data = "csv"  # 使用相对路径
 
     ld = LoadData(
@@ -856,11 +861,11 @@ if __name__ == "__main__":
         data_folder=A_workplace_data
     )
 
-    df_mv = ld.get_hold_num(
-        start_sorted=0,
-        hold_num=50,
-        the_end_month='2022-07'  # 这里可以根据需要进行修改
-    )
+    # df_mv = ld.get_hold_num(
+    #     start_sorted=0,
+    #     hold_num=50,
+    #     the_end_month='2022-07'  # 这里可以根据需要进行修改
+    # )
     
     params = {
         'start_date': start_date,    # 回测起始日期
@@ -883,10 +888,10 @@ if __name__ == "__main__":
             cumulative_return = (1 + fixed_results['daily_return']).cumprod().iloc[-1] - 1
             logger.info(f"累计收益率: {cumulative_return:.2%}")
             
-        if dynamic_results is not None:
-            logger.info("\n=== 动态持仓策略结果摘要 ===")
-            cumulative_return = (1 + dynamic_results['daily_return']).cumprod().iloc[-1] - 1
-            logger.info(f"累计收益率: {cumulative_return:.2%}")
+        # if dynamic_results is not None:
+        #     logger.info("\n=== 动态持仓策略结果摘要 ===")
+        #     cumulative_return = (1 + dynamic_results['daily_return']).cumprod().iloc[-1] - 1
+        #     logger.info(f"累计收益率: {cumulative_return:.2%}")
             
     except Exception as e:
         logger.error(f"程序执行失败: {e}")

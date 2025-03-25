@@ -436,22 +436,29 @@ class PortfolioMetrics:
         print(f"已保存{output_prefix}频投资组合指标数据，共 {len(results)} 行")
         print(f"数据已同时保存为 CSV 和 NPY 格式")
 
-if __name__ == "__main__":
+def main():
+    """主函数，支持交互式和命令行参数两种调用方式"""
     from pathlib import Path
     
-    # 交互式参数输入
     print("=== 投资组合指标计算器 ===")
     weight_path = input("请输入权重文件路径 (默认csv/test_daily_weight.csv): ") or 'csv/test_daily_weight.csv'
-    use_equal = input("是否使用等权重？[y/n] (默认y): ").lower() or 'y'
-    return_file = input("请输入收益率文件路径（留空则从数据库获取）: ") or None
-
+    
     # 处理路径解析
     abs_weight_path = str(Path(__file__).parent.parent / weight_path)
+    weights_df = pd.read_csv(abs_weight_path)
     
+    # 自动检测权重列并提示
+    if 'weight' in weights_df.columns:
+        print("\n检测到权重列存在，将直接使用文件中的权重")
+        use_equal = 'n'
+    else:
+        print("\n未检测到权重列")
+        use_equal = input("是否使用等权重？[y/n] (默认y): ").lower() or 'y'
+    
+    return_file = input("请输入收益率文件路径（留空则从数据库获取）: ") or None
+
     # 初始化检查器
     checker = DataChecker()
-    
-    # 加载并检查权重数据
     weights = pd.read_csv(abs_weight_path)
     checker.check_trading_dates(weights)
     
@@ -465,3 +472,31 @@ if __name__ == "__main__":
     # 执行计算并保存结果
     returns, turnover = portfolio.calculate_portfolio_metrics()
     print(f"\n计算完成！结果已保存至 output/ 目录")
+
+if __name__ == "__main__":
+    main()
+
+# 新增模块调用接口
+def calculate_from_args(weight_path, return_file=None, use_equal=True):
+    """
+    编程式调用接口
+    
+    Args:
+        weight_path: 权重文件路径（相对或绝对路径）
+        return_file: 收益率文件路径（可选）
+        use_equal: 是否使用等权重（默认为True）
+    """
+    from pathlib import Path
+    
+    abs_weight_path = str(Path(__file__).parent.parent / weight_path)
+    
+    checker = DataChecker()
+    weights = pd.read_csv(abs_weight_path)
+    checker.check_trading_dates(weights)
+    
+    portfolio = PortfolioMetrics(
+        weight_file=abs_weight_path,
+        return_file=return_file,
+        use_equal_weights=use_equal
+    )
+    return portfolio.calculate_portfolio_metrics()
