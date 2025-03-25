@@ -131,7 +131,21 @@ class Backtest:
         self._load_matrix('trade_status_matrix', r'D:\Derek\Code\Matrix\csv\aligned_trade_status_matrix.csv')
         self._load_matrix('score_matrix', r'D:\Derek\Code\Matrix\csv\aligned_score_matrix.csv')
         
+        # 获取所有矩阵的最大形状
+        max_index = self._get_common_index()
+        max_columns = self.stocks_matrix.columns.union(self.limit_matrix.columns).union(
+            self.risk_warning_matrix.columns).union(self.trade_status_matrix.columns).union(
+            self.score_matrix.columns)
+
+        # 扩展所有矩阵到最大形状
+        self.stocks_matrix = self.stocks_matrix.reindex(index=max_index, columns=max_columns).fillna(0)
+        self.limit_matrix = self.limit_matrix.reindex(index=max_index, columns=max_columns).fillna(0)
+        self.risk_warning_matrix = self.risk_warning_matrix.reindex(index=max_index, columns=max_columns).fillna(0)
+        self.trade_status_matrix = self.trade_status_matrix.reindex(index=max_index, columns=max_columns).fillna(0)
+        self.score_matrix = self.score_matrix.reindex(index=max_index, columns=max_columns).fillna(0)
+
         # 添加基础矩阵形状日志
+        logger.debug(f"基础矩阵形状 | 收益率矩阵: {self.stocks_matrix.shape}")
         logger.debug(f"基础矩阵形状 | 涨跌停矩阵: {self.limit_matrix.shape}")
         logger.debug(f"基础矩阵形状 | 风险警示矩阵: {self.risk_warning_matrix.shape}")
         logger.debug(f"基础矩阵形状 | 交易状态矩阵: {self.trade_status_matrix.shape}")
@@ -240,61 +254,62 @@ class Backtest:
         """更新持仓策略的持仓"""
         previous_positions = position_history.iloc[day - 1]["hold_positions"]
         current_date = position_history.index[day]
-
-        # 评分矩阵空值检查
-        if self.score_matrix.iloc[day - 1].isna().all():
+    
+        # 使用NumPy数组检查评分矩阵空值
+        score_array = self.score_matrix.iloc[day - 1].to_numpy()
+        if np.isnan(score_array).all():
             position_history.loc[current_date, "hold_positions"] = previous_positions
             return
-
+    
         # 处理前一天的持仓
         previous_positions = (set() if pd.isna(previous_positions) 
-                            else set(previous_positions.split(',')))
+                        else set(previous_positions.split(',')))
         previous_positions = {stock for stock in previous_positions 
-                            if isinstance(stock, str) and stock.isalnum()}
-
+                        if isinstance(stock, str) and stock.isalnum()}
+    
         # 计算有效股票和受限股票
-        valid_stocks = self.valid_stocks_matrix.iloc[day].astype(bool)
-        restricted = self.restricted_stocks_matrix.iloc[day].astype(bool)
+        valid_stocks = self.valid_stocks_matrix.iloc[day].to_numpy().astype(bool)
+        restricted = self.restricted_stocks_matrix.iloc[day].to_numpy().astype(bool)
         previous_date = position_history.index[day - 1]
-        valid_scores = self.score_matrix.loc[previous_date]
-
+        valid_scores = self.score_matrix.loc[previous_date].to_numpy()
+    
         # 处理受限股票
         restricted_stocks = [stock for stock in previous_positions 
-                           if not restricted[stock]]
-
+                       if not restricted[self.stocks_matrix.columns.get_loc(stock)]]
+    
         # 再平衡处理
         if (day - 1) % rebalance_frequency == 0:
-            sorted_stocks = valid_scores.sort_values(ascending=False)
+            sorted_indices = np.argsort(-valid_scores)  # 降序排序
             try:
                 # 只保留固定策略逻辑
-                top_stocks = sorted_stocks.iloc[:hold_count]
-
+                top_indices = sorted_indices[:hold_count]
+    
                 retained_stocks = list(set(previous_positions) & 
-                                    set(top_stocks) | 
-                                    set(restricted_stocks))
+                                set(self.stocks_matrix.columns[top_indices]) | 
+                                set(restricted_stocks))
                 new_positions_needed = hold_count - len(retained_stocks)
                 final_positions = set(retained_stocks)
-
+    
                 if new_positions_needed > 0:
-                    new_stocks = sorted_stocks[valid_stocks].index
+                    new_stocks = self.stocks_matrix.columns[valid_stocks]
                     new_stocks = [stock for stock in new_stocks 
                                 if stock not in final_positions]
                     final_positions.update(new_stocks[:new_positions_needed])
             except IndexError:
                 logger.warning(f"日期 {current_date}: 可用股票数量不足，使用所有有效股票")
-                final_positions = set(sorted_stocks[valid_stocks].index[:hold_count])
+                final_positions = set(self.stocks_matrix.columns[valid_stocks][:hold_count])
         else:
             final_positions = set(previous_positions)
-
+    
         # 更新持仓信息
         position_history.loc[current_date, "hold_positions"] = ','.join(final_positions)
-
+    
         # 计算每日收益率和换手率
         if previous_date in self.stocks_matrix.index:
             daily_returns = self.stocks_matrix.loc[current_date, 
-                                                 list(final_positions)].astype(float)
-            position_history.loc[current_date, "daily_return"] = daily_returns.mean()
-
+                                             list(final_positions)].to_numpy().astype(float)
+            position_history.loc[current_date, "daily_return"] = np.mean(daily_returns)
+    
         turnover_rate = (len(previous_positions - final_positions) / 
                         max(len(previous_positions), 1))
         position_history.at[current_date, "turnover_rate"] = turnover_rate
