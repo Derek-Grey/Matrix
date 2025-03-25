@@ -108,7 +108,7 @@ def read_all_npq_files(data_root):
 
 class Backtest:
     def __init__(self, data_root, output_dir=Path('output')):
-        """初始化支持时间段回测"""
+        """初始化支持时间段回测""" 
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -119,44 +119,41 @@ class Backtest:
             columns='code',
             values='pct_chg'
         ).fillna(0)
+        
+        # 新增矩阵保存逻辑
+        matrix_path = self.output_dir / 'stocks_matrix.csv'
+        self.stocks_matrix.to_csv(matrix_path)
+        logger.success(f"收益率矩阵已保存至: {matrix_path}")
 
         # 简化矩阵加载（保持原有功能）
         self._load_matrix('limit_matrix', r'D:\Derek\Code\Matrix\csv\aligned_limit_matrix.csv')
         self._load_matrix('risk_warning_matrix', r'D:\Derek\Code\Matrix\csv\aligned_riskwarning_matrix.csv')
         self._load_matrix('trade_status_matrix', r'D:\Derek\Code\Matrix\csv\aligned_trade_status_matrix.csv')
         self._load_matrix('score_matrix', r'D:\Derek\Code\Matrix\csv\aligned_score_matrix.csv')
+        
+        # 添加基础矩阵形状日志
+        logger.debug(f"基础矩阵形状 | 涨跌停矩阵: {self.limit_matrix.shape}")
+        logger.debug(f"基础矩阵形状 | 风险警示矩阵: {self.risk_warning_matrix.shape}")
+        logger.debug(f"基础矩阵形状 | 交易状态矩阵: {self.trade_status_matrix.shape}")
+        logger.debug(f"基础矩阵形状 | 评分矩阵: {self.score_matrix.shape}")
 
+        # 将有效性矩阵生成移动到__init__方法内
+        self._generate_validity_matrices()
+
+    # ====================== 数据加载方法 ======================
     def _load_matrix(self, attr_name, file_path):
-        """简化版矩阵加载"""
-        try:
-            setattr(self, attr_name, pd.read_csv(file_path, index_col=0))
-        except Exception as e:
-            logger.error(f"加载失败 {attr_name}: {str(e)}")
-            setattr(self, attr_name, pd.DataFrame())
-
-    def _load_matrix_with_fallback(self, attr_name, file_path):
-        """带错误处理的矩阵加载方法"""
+        """统一带错误处理的矩阵加载方法"""
         try:
             matrix = pd.read_csv(file_path, index_col=0)
             setattr(self, attr_name, matrix)
             logger.success(f"成功加载 {attr_name}: {file_path}")
         except Exception as e:
             logger.error(f"加载失败 {attr_name}: {str(e)}")
-            setattr(self, attr_name, pd.DataFrame())  # 创建空DataFrame防止后续崩溃
+            setattr(self, attr_name, pd.DataFrame())
 
-    def _create_stocks_matrix(self, df):
-        """从NPQ数据创建收益率矩阵"""
-        # 筛选所需列并重塑为宽表格式
-        return df.pivot_table(
-            index='date',
-            columns='code',
-            values='pct_chg',
-            aggfunc='first'
-        ).fillna(0)
-
+    # ====================== 核心矩阵生成 ====================== 
     def _generate_validity_matrices(self):
-        """生成时间对齐后的有效性矩阵"""
-        # 获取所有矩阵的共同时间索引
+        """生成时间对齐后的有效性矩阵（最终版）"""
         common_index = self._get_common_index()
         
         # 对齐各矩阵时间范围
@@ -171,8 +168,9 @@ class Backtest:
             self.limit_validity
         )
 
+    # ====================== 工具方法 ======================
     def _get_common_index(self):
-        """获取所有矩阵的交集时间索引"""
+        """获取所有矩阵的交集时间索引（最终版）"""
         matrices = [
             self.stocks_matrix,
             self.limit_matrix,
@@ -187,20 +185,10 @@ class Backtest:
         return common_index
 
     def _align_matrix(self, matrix, new_index):
-        """矩阵时间对齐方法"""
+        """矩阵时间对齐方法（最终版）"""
         if not matrix.empty:
             return matrix.reindex(index=new_index, method='ffill').fillna(0).astype(int)
         return pd.DataFrame(0, index=new_index, columns=matrix.columns)
-
-    def _load_matrix_with_fallback(self, attr_name, file_path):
-        """带错误处理的矩阵加载方法"""
-        try:
-            matrix = pd.read_csv(file_path, index_col=0)
-            setattr(self, attr_name, matrix)
-            logger.success(f"成功加载 {attr_name}: {file_path}")
-        except Exception as e:
-            logger.error(f"加载失败 {attr_name}: {str(e)}")
-            setattr(self, attr_name, pd.DataFrame())  # 创建空DataFrame防止后续崩溃
 
     def _create_stocks_matrix(self, df):
         """从NPQ数据创建收益率矩阵"""
@@ -229,10 +217,26 @@ class Backtest:
         self.restricted_stocks_matrix = (
             self.trade_status_validity * self.limit_validity
         )
+
+
+    def _get_common_index(self):
+        """获取所有矩阵的交集时间索引"""
+        matrices = [
+            self.stocks_matrix,
+            self.limit_matrix,
+            self.risk_warning_matrix,
+            self.trade_status_matrix,
+            self.score_matrix
+        ]
+        common_index = matrices[0].index
+        for mat in matrices[1:]:
+            if not mat.empty:
+                common_index = common_index.intersection(mat.index)
+        return common_index
+
     
     @log_function_call
-    def _update_positions(self, position_history, day, hold_count, 
-                         rebalance_frequency):
+    def _update_positions(self, position_history, day, hold_count, rebalance_frequency):
         """更新持仓策略的持仓"""
         previous_positions = position_history.iloc[day - 1]["hold_positions"]
         current_date = position_history.index[day]
@@ -297,7 +301,7 @@ class Backtest:
 
     @log_function_call
     def run_fixed_strategy(self, hold_count, rebalance_frequency, start_date=None, end_date=None):
-        """运行带时间范围的策略"""
+        """运行带时间范围的策略""" 
         # 新增时间范围过滤
         if start_date and end_date:
             self.stocks_matrix = self.stocks_matrix.loc[start_date:end_date]
@@ -375,12 +379,77 @@ class Backtest:
         position_history['turnover_rate'] = 0.0
         return position_history
 
+def run_strategy(backtest, strategy_name, hold_count, rebalance_frequency):
+    """
+    运行回测策略并保存结果
+    
+    Args:
+        backtest: Backtest 实例
+        strategy_name: 策略名称（仅支持fixed）
+        hold_count: 固定持仓数量
+        rebalance_frequency: 再平衡频率（天数）
+    """
+    logger.info(f"运行{strategy_name}策略...")
+    try:
+        if strategy_name == "fixed":
+            results = backtest.run_fixed_strategy(
+                hold_count=hold_count,
+                rebalance_frequency=rebalance_frequency
+            )
+            logger.info(f"{strategy_name}策略完成")
+            return results
+        else:
+            logger.error(f"不支持的策略类型: {strategy_name}")
+            return None
+    except Exception as e:
+        logger.error(f"{strategy_name}策略执行失败: {e}")
+        return None
+
+def main(start_date="2010-08-02", end_date="2020-07-31", 
+         hold_count=50, rebalance_frequency=1,
+         data_directory='csv', output_directory='output'):
+    """
+    主函数，执行回测策略
+    
+    Args:
+        start_date: 回测开始日期，格式："YYYY-MM-DD"
+        end_date: 回测结束日期，格式："YYYY-MM-DD"
+        hold_count: 持仓数量，默认50只股票
+        rebalance_frequency: 再平衡频率（天数），默认每天再平衡
+        data_directory: 数据目录，存放原始数据和中间数据
+        output_directory: 输出目录，存放回测结果和图表
+        
+    Returns:
+        DataFrame: 固定持仓的回测结果
+    """
+    try:
+        logger.info(f"开始回测 - 时间范围: {start_date} 至 {end_date}")
+        
+        # 第一步：数据准备
+        logger.info("加载数据...")
+        data_loader = LoadData(start_date, end_date, data_directory)
+        matrices = process_data(data_loader)
+        
+        # 第二步：初始化回测实例
+        backtest = Backtest(*matrices, output_dir=output_directory)
+        
+        # 第三部：执行固定持仓策略回测
+        fixed_results = run_strategy(backtest, "fixed", hold_count, rebalance_frequency)
+        
+        logger.info("回测完成")
+        return fixed_results
+    
+    except Exception as e:
+        logger.error(f"回测执行失败: {e}")
+        raise
+
 if __name__ == "__main__":
+    # 更新测试代码（仅运行固定策略）
     backtester = Backtest(r"D:\Data")
-    stats = backtester.run_fixed_strategy(
+    
+    fixed_results = run_strategy(
+        backtester, 
+        strategy_name="fixed",
         hold_count=10,
-        rebalance_frequency=5,
-        start_date="2025-02-01", 
-        end_date="2025-02-28"
+        rebalance_frequency=5
     )
-    print(f"回测结果: {stats}")
