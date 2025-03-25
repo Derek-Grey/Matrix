@@ -88,84 +88,61 @@ def read_npq_file(file_path):
     return pd.DataFrame(rows, columns=columns)
 
 def read_all_npq_files(data_root):
-    """遍历数据根目录读取所有NPQ文件"""
+    """遍历时间段目录读取NPQ文件"""
+    data_path = Path(data_root)
     all_dfs = []
-    data_root = Path(data_root)
     
-    # 新增路径解析调试
-    logger.debug(f"解析后的数据根目录: {data_root.resolve()}")
-    logger.debug(f"根目录存在: {data_root.exists()}")
-    logger.debug(f"根目录是文件夹: {data_root.is_dir()}")
-
-    # 直接处理单个日期目录
-    sub_dir = data_root / "1"
-    logger.debug(f"子目录路径: {sub_dir.resolve()}")
-    
-    if not sub_dir.is_dir():
-        # 添加详细目录列表
-        logger.error(f"子目录内容: {[p.name for p in data_root.glob('*')]}")
-        raise FileNotFoundError(f"缺失子目录: {sub_dir}")
-    
-    npq_path = sub_dir / "11.npq"
-    # 新增路径净化处理
-    clean_npq_path = Path(os.path.normcase(os.path.abspath(npq_path)))  # 标准化路径格式
-    logger.debug(f"净化后路径: {clean_npq_path}")
-    
-    # 新增文件扩展名检查
-    actual_files = [f.name for f in sub_dir.glob('*')]
-    logger.debug(f"实际文件名列表: {actual_files}")
-    
-    if not clean_npq_path.exists():
-        # 新增相似文件匹配
-        similar_files = [f for f in sub_dir.glob('*11*') if f.is_file()]
-        logger.error(f"发现相似文件: {[f.name for f in similar_files]}")
-        raise FileNotFoundError(f"NPQ文件不存在，请检查文件名是否准确: {clean_npq_path}")
-    
-    logger.debug(f"NPQ文件绝对路径: {npq_path.resolve()}")
-    logger.debug(f"文件存在: {npq_path.exists()}")
-    
-    if not npq_path.exists():
-        # 添加文件系统检查
-        logger.error(f"该路径下实际文件: {[f.name for f in sub_dir.glob('*')]}")
-        raise FileNotFoundError(f"NPQ文件不存在: {npq_path}")
-    
-    try:
-        df = read_npq_file(str(npq_path))
-        df['date'] = data_root.name
-        all_dfs.append(df)
-        logger.success(f"成功加载单日数据: {npq_path}")
-    except Exception as e:
-        logger.error(f"加载失败 {npq_path}: {str(e)}")
-        raise
-    
+    # 遍历所有日期子目录
+    for date_dir in data_path.glob('*'):
+        if date_dir.is_dir():
+            npq_file = date_dir / "1" / "11.npq"
+            try:
+                df = read_npq_file(str(npq_file))
+                df['date'] = date_dir.name  # 保留日期作为索引
+                all_dfs.append(df)
+            except Exception as e:
+                logger.warning(f"跳过{date_dir}，加载失败: {str(e)}")
+                continue
+                
     return pd.concat(all_dfs).sort_values('date')
 
 class Backtest:
-    def __init__(self, data_root, output_dir=OUTPUT_DIR):
-        """初始化回测类（支持批量读取）"""
+    def __init__(self, data_root, output_dir=Path('output')):
+        """初始化支持时间段回测"""
+        self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 从本地读取其他矩阵（增加错误处理）
-        self._load_matrix_with_fallback('limit_matrix', r'D:\Derek\Code\Matrix\csv\aligned_limit_matrix.csv')
-        self._load_matrix_with_fallback('risk_warning_matrix', r'D:\Derek\Code\Matrix\csv\aligned_riskwarning_matrix.csv')
-        self._load_matrix_with_fallback('trade_status_matrix', r'D:\Derek\Code\Matrix\csv\aligned_trade_status_matrix.csv')
-        self._load_matrix_with_fallback('score_matrix', r'D:\Derek\Code\Matrix\csv\aligned_score_matrix.csv')
-
-        # 批量读取NPQ数据
+        # 直接加载核心数据
         full_df = read_all_npq_files(data_root)
-        # 生成股票收益率矩阵（保持独立时间）
-        self.stocks_matrix = self._create_stocks_matrix(full_df)
-        
-        # 加载其他矩阵并保持各自时间范围
-        self._load_matrix_with_fallback('limit_matrix', r'D:\Derek\Code\Matrix\csv\aligned_limit_matrix.csv')
-        self._load_matrix_with_fallback('risk_warning_matrix', r'D:\Derek\Code\Matrix\csv\aligned_riskwarning_matrix.csv')
-        self._load_matrix_with_fallback('trade_status_matrix', r'D:\Derek\Code\Matrix\csv\aligned_trade_status_matrix.csv')
-        self._load_matrix_with_fallback('score_matrix', r'D:\Derek\Code\Matrix\csv\aligned_score_matrix.csv')
+        self.stocks_matrix = full_df.pivot_table(
+            index='date',
+            columns='code',
+            values='pct_chg'
+        ).fillna(0)
 
-        # 显示独立时间范围
-        self._show_loaded_matrices()  # <-- 这里被调用
-        
-        # 生成对齐后的有效性矩阵
-        self._generate_validity_matrices()
+        # 简化矩阵加载（保持原有功能）
+        self._load_matrix('limit_matrix', r'D:\Derek\Code\Matrix\csv\aligned_limit_matrix.csv')
+        self._load_matrix('risk_warning_matrix', r'D:\Derek\Code\Matrix\csv\aligned_riskwarning_matrix.csv')
+        self._load_matrix('trade_status_matrix', r'D:\Derek\Code\Matrix\csv\aligned_trade_status_matrix.csv')
+        self._load_matrix('score_matrix', r'D:\Derek\Code\Matrix\csv\aligned_score_matrix.csv')
+
+    def _load_matrix(self, attr_name, file_path):
+        """简化版矩阵加载"""
+        try:
+            setattr(self, attr_name, pd.read_csv(file_path, index_col=0))
+        except Exception as e:
+            logger.error(f"加载失败 {attr_name}: {str(e)}")
+            setattr(self, attr_name, pd.DataFrame())
+
+    def _load_matrix_with_fallback(self, attr_name, file_path):
+        """带错误处理的矩阵加载方法"""
+        try:
+            matrix = pd.read_csv(file_path, index_col=0)
+            setattr(self, attr_name, matrix)
+            logger.success(f"成功加载 {attr_name}: {file_path}")
+        except Exception as e:
+            logger.error(f"加载失败 {attr_name}: {str(e)}")
+            setattr(self, attr_name, pd.DataFrame())  # 创建空DataFrame防止后续崩溃
 
     def _create_stocks_matrix(self, df):
         """从NPQ数据创建收益率矩阵"""
@@ -319,13 +296,16 @@ class Backtest:
         position_history.at[current_date, "turnover_rate"] = turnover_rate
 
     @log_function_call
-    def run_fixed_strategy(self, hold_count, rebalance_frequency):
-        """运行固定持仓策略"""
+    def run_fixed_strategy(self, hold_count, rebalance_frequency, start_date=None, end_date=None):
+        """运行带时间范围的策略"""
+        # 新增时间范围过滤
+        if start_date and end_date:
+            self.stocks_matrix = self.stocks_matrix.loc[start_date:end_date]
+        
         start_time = time.time()
         position_history = self._initialize_position_history()
-
+    
         for day in range(1, len(self.stocks_matrix)):
-            # 移除不再需要的参数
             self._update_positions(position_history, day, hold_count, rebalance_frequency)
         
         return self._process_results(position_history, start_time)
@@ -372,15 +352,35 @@ class Backtest:
         logger.info("\n=== 加载矩阵时间范围 ===")
         for name, mat in matrix_info:
             if not mat.empty:
+                # 新增数据预览
                 logger.info(f"{name:.<15} 日期范围: {mat.index[0]} 至 {mat.index[-1]} 股票数量: {len(mat.columns)}")
+                logger.debug(f"{name}前3行数据:\n{mat.head(3).to_string()}")
             else:
                 logger.warning(f"{name:.<15} 未成功加载数据")
 
+        # 新增完整结构输出
+        logger.debug("\n=== 矩阵结构预览 ===")
+        for name, mat in matrix_info:
+            if not mat.empty:
+                logger.debug(f"{name} shape: {mat.shape}\nColumns: {mat.columns.tolist()[:5]}...")
+            else:
+                logger.warning(f"{name:.<15} 未成功加载数据")
+
+    def _initialize_position_history(self):
+        """初始化持仓历史记录"""
+        # 假设持仓历史记录是一个DataFrame，初始化时包含日期索引和空的持仓信息
+        position_history = pd.DataFrame(index=self.stocks_matrix.index)
+        position_history['hold_positions'] = None
+        position_history['daily_return'] = 0.0
+        position_history['turnover_rate'] = 0.0
+        return position_history
+
 if __name__ == "__main__":
-    backtester = Backtest(r"D:\Data\2025-02-25")
-    # 运行策略
+    backtester = Backtest(r"D:\Data")
     stats = backtester.run_fixed_strategy(
         hold_count=10,
-        rebalance_frequency=5
+        rebalance_frequency=5,
+        start_date="2025-02-01", 
+        end_date="2025-02-28"
     )
     print(f"回测结果: {stats}")

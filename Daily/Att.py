@@ -851,8 +851,8 @@ def main(start_date="2010-08-02", end_date="2020-07-31",
 
 if __name__ == "__main__":
     # 统一设置回测参数
-    start_date = "2025-01-01"
-    end_date = "2025-01-31"
+    start_date = "2025-01-02"
+    end_date = "2025-01-27"
     A_workplace_data = "csv"  # 使用相对路径
 
     ld = LoadData(

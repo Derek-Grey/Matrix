@@ -2,7 +2,7 @@ import pandas as pd
 import glob
 
 
-file_pattern = r"data\*.csv"
+file_pattern = r"csv\*.csv"
 
 # 获取所有匹配模式的文件路径列表
 file_list = glob.glob(file_pattern)
