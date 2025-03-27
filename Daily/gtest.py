@@ -87,20 +87,24 @@ def process_data(data_loader):
             logger.debug('发现现有对齐数据文件，尝试加载...')
             try:
                 # 读取原始文件的日期范围
+                start_time = time.time()
                 wind_df = pd.read_csv(os.path.join(data_loader.data_folder, 'raw_wind_data.csv'))
                 wind_df['date'] = pd.to_datetime(wind_df['date'])
                 raw_start_date = wind_df['date'].min()
                 raw_end_date = wind_df['date'].max()
+                logger.info(f"读取 'raw_wind_data.csv' 耗时: {time.time() - start_time:.2f}秒")
 
                 # 检查日期范围是否符合要求
                 if start_date >= raw_start_date and end_date <= raw_end_date:
                     logger.debug('设定日期范围在原始文件日期范围内，加载对齐数据...')
                     
                     # 加载对齐文件
+                    start_time = time.time()
                     aligned_limit_matrix = pd.read_csv(
                         os.path.join(data_loader.data_folder, 'aligned_limit_matrix.csv'), 
                         index_col=0, parse_dates=True
                     )
+                    logger.info(f"读取 'aligned_limit_matrix.csv' 耗时: {time.time() - start_time:.2f}秒")
                     
                     # 验证 aligned_limit_matrix 的时间范围
                     aligned_start_date = aligned_limit_matrix.index.min()
@@ -110,22 +114,33 @@ def process_data(data_loader):
                         
                         # 尝试加载其他对齐文件
                         try:
+                            start_time = time.time()
                             aligned_stocks_matrix = pd.read_csv(
                                 os.path.join(data_loader.data_folder, 'aligned_stocks_matrix.csv'), 
                                 index_col=0, parse_dates=True
                             )
+                            logger.info(f"读取 'aligned_stocks_matrix.csv' 耗时: {time.time() - start_time:.2f}秒")
+
+                            start_time = time.time()
                             aligned_riskwarning_matrix = pd.read_csv(
                                 os.path.join(data_loader.data_folder, 'aligned_riskwarning_matrix.csv'), 
                                 index_col=0, parse_dates=True
                             )
+                            logger.info(f"读取 'aligned_riskwarning_matrix.csv' 耗时: {time.time() - start_time:.2f}秒")
+
+                            start_time = time.time()
                             aligned_trade_status_matrix = pd.read_csv(
                                 os.path.join(data_loader.data_folder, 'aligned_trade_status_matrix.csv'), 
                                 index_col=0, parse_dates=True
                             )
+                            logger.info(f"读取 'aligned_trade_status_matrix.csv' 耗时: {time.time() - start_time:.2f}秒")
+
+                            start_time = time.time()
                             score_matrix = pd.read_csv(
                                 os.path.join(data_loader.data_folder, 'aligned_score_matrix.csv'), 
                                 index_col=0, parse_dates=True
                             )
+                            logger.info(f"读取 'aligned_score_matrix.csv' 耗时: {time.time() - start_time:.2f}秒")
                             
                             # 截取所需日期范围的数据
                             date_mask = lambda df: (df.index >= start_date) & (df.index <= end_date)
@@ -461,10 +476,6 @@ class Backtest:
         # 初始化当前持仓数量，默认为传入的 hold_count
         current_hold_count = hold_count  
 
-        # 如果策略为动态策略，根据当前天数更新当前持仓数量
-        if strategy_type == "dynamic":
-            current_hold_count = max(1, int(current_hold_count))  # 确保持仓数量至少为1
-
         # 如果评分矩阵的前一天数据全为NaN，保持前一天的持仓
         if self.score_matrix.iloc[day - 1].isna().all():
             position_history.loc[current_date, "hold_positions"] = previous_positions
@@ -487,13 +498,7 @@ class Backtest:
         if (day - 1) % rebalance_frequency == 0:
             sorted_stocks = valid_scores.sort_values(ascending=False)
             try:
-                if strategy_type == "fixed":
-                    top_stocks = sorted_stocks.iloc[:hold_count]  # 固定策略选择前 hold_count 只股票
-                else:  # dynamic
-                    start_pos = max(0, int(current_start_pos))
-                    hold_num = max(1, int(current_hold_count))
-                    top_stocks = sorted_stocks.iloc[start_pos:start_pos + hold_num]  # 动态策略选择相应数量的股票
-
+                top_stocks = sorted_stocks.iloc[:hold_count]  # 固定策略选择前 hold_count 只股票
                 retained_stocks = list(set(previous_positions) & set(top_stocks) | set(restricted_stocks))
                 new_positions_needed = hold_count - len(retained_stocks)
                 final_positions = set(retained_stocks)
@@ -537,25 +542,6 @@ class Backtest:
         results = self._process_results(position_history, strategy_name, start_time)
         return results
 
-    def run_dynamic_strategy(self, rebalance_frequency, df_mv, start_sorted=100, the_end_month=None, fixed_by_month=True):
-        """
-        运行动态持仓策略
-        """
-        start_time = time.time()
-        position_history = self._initialize_position_history("dynamic")
-
-        # 执行回测循环
-        for day in range(1, len(self.stocks_matrix)):
-            current_date = position_history.index[day].strftime('%Y-%m-%d')
-            # 确保 current_hold_count 被定义
-            current_hold_count = df_mv.loc[current_date, 'hold_num'] if current_date in df_mv.index else 50
-            current_hold_count = int(current_hold_count)
-            
-            # 将 current_hold_count 传递给 _update_positions
-            self._update_positions(position_history, day, current_hold_count, rebalance_frequency, "dynamic", start_sorted)
-        
-        results = self._process_results(position_history, "dynamic", start_time)
-        return results
 
     def _initialize_position_history(self, strategy_name):
         """
@@ -750,20 +736,8 @@ def save_results(results, strategy_name, output_directory):
 
 # %% 
 # 添加运行策略的方法
+# 修改 run_strategy 函数
 def run_strategy(backtest, strategy_name, hold_count, rebalance_frequency, df_mv=None):
-    """
-    运行回测策略并保存结果
-    
-    Args:
-        backtest: Backtest 实例
-        strategy_name: 策略名称
-        hold_count: 固定持仓数量（动态策略时不使用）
-        rebalance_frequency: 再平衡频率（天数）
-        df_mv: 包含每月持仓数量的 DataFrame（仅用于动态策略）
-        
-    Returns:
-        results: 包含回测结果的DataFrame
-    """
     logger.info(f"运行{strategy_name}策略...")
     try:
         if strategy_name == "fixed":
@@ -772,16 +746,10 @@ def run_strategy(backtest, strategy_name, hold_count, rebalance_frequency, df_mv
                 rebalance_frequency=rebalance_frequency,
                 strategy_name=strategy_name
             )
-        elif strategy_name == "dynamic":
-            # 从 df_mv 中获取当前日期的持仓数量
-            current_date = backtest.stocks_matrix.index[-1].strftime('%Y-%m-%d')
-            current_hold_count = df_mv.loc[current_date, 'hold_num'] if current_date in df_mv.index else 50
-            
-            results = backtest.run_dynamic_strategy(
-                rebalance_frequency=rebalance_frequency,
-                df_mv=df_mv,
-                start_sorted=current_hold_count  # 使用从 df_mv 中获取的持仓数量
-            )
+        else:
+            # 移除动态策略分支
+            raise ValueError("不支持的策略类型")
+        
         backtest.plot_results(results, strategy_name)
         save_results(results, strategy_name, backtest.output_dir)
         logger.info(f"{strategy_name}策略完成")
@@ -795,11 +763,11 @@ def run_strategy(backtest, strategy_name, hold_count, rebalance_frequency, df_mv
 def main(start_date="2010-08-02", end_date="2020-07-31", 
          hold_count=50, rebalance_frequency=1,
          data_directory='csv', output_directory='output',
-         run_fixed=True, run_dynamic=True):
+         run_fixed=True):
     """
     主函数，执行回测策略
     """
-    total_time = 0  # 初始化总耗时
+    total_time = 0
     try:
         logger.info(f"开始回测 - 时间范围: {start_date} 至 {end_date}")
         
@@ -827,27 +795,16 @@ def main(start_date="2010-08-02", end_date="2020-07-31",
             fixed_time = time.time() - step_start
             total_time += fixed_time
         
-        # 第四步：执行动态持仓策略回测
-        dynamic_time = 0
-        if run_dynamic:
-            step_start = time.time()
-            df_mv = data_loader.get_hold_num_per()
-            results['dynamic'] = run_strategy(backtest, "dynamic", hold_count, rebalance_frequency, df_mv)
-            dynamic_time = time.time() - step_start
-            total_time += dynamic_time
-        
-        # 输出时间统计
+        # 输出时间统计（删除动态策略相关代码）
         logger.info("\n=== 耗时统计 ===")
         logger.info(f"数据加载耗时: {data_loading_time:.2f}秒")
         logger.info(f"回测初始化耗时: {init_time:.2f}秒")
-        if run_fixed: 
-            logger.info(f"固定策略运行耗时: {fixed_time:.2f}秒")
-        if run_dynamic:
-            logger.info(f"动态策略运行耗时: {dynamic_time:.2f}秒")
+        if run_fixed and fixed_time > 0:  # 仅在策略运行时显示
+            logger.info(f"固定策略运行耗时: {fixed_time:.2f}秒") 
         logger.info(f"总耗时: {total_time:.2f}秒")
         
         logger.info("回测完成")
-        return results.get('fixed'), results.get('dynamic')
+        return results.get('fixed')
     
     except Exception as e:
         logger.error(f"回测执行失败: {e}")
@@ -855,7 +812,7 @@ def main(start_date="2010-08-02", end_date="2020-07-31",
 
 if __name__ == "__main__":
     # 统一设置回测参数
-    start_date = "2010-08-01"
+    start_date = "2015-08-03"
     end_date = "2020-07-31"
     A_workplace_data = "csv"  # 使用相对路径
 
@@ -865,12 +822,7 @@ if __name__ == "__main__":
         data_folder=A_workplace_data
     )
 
-    # df_mv = ld.get_hold_num(
-    #     start_sorted=0,
-    #     hold_num=50,
-    #     the_end_month='2022-07'  # 这里可以根据需要进行修改
-    # )
-    
+    # 回测参数
     params = {
         'start_date': start_date,    # 回测起始日期
         'end_date': end_date,        # 回测结束日期
@@ -879,24 +831,18 @@ if __name__ == "__main__":
         'data_directory': 'csv',     # 数据目录
         'output_directory': 'output', # 输出目录
         'run_fixed': True,           # 运行固定持仓策略
-        'run_dynamic': True          # 运行动态持仓策略
     }
 
     # 执行回测
     try:
-        fixed_results, dynamic_results = main(**params)
+        fixed_results = main(**params)
         
         # 输出回测结果摘要
         if fixed_results is not None:
             logger.info("\n=== 固定持仓策略结果摘要 ===")
             cumulative_return = (1 + fixed_results['daily_return']).cumprod().iloc[-1] - 1
             logger.info(f"累计收益率: {cumulative_return:.2%}")
-            
-        # if dynamic_results is not None:
-        #     logger.info("\n=== 动态持仓策略结果摘要 ===")
-        #     cumulative_return = (1 + dynamic_results['daily_return']).cumprod().iloc[-1] - 1
-        #     logger.info(f"累计收益率: {cumulative_return:.2%}")
-            
+
     except Exception as e:
         logger.error(f"程序执行失败: {e}")
 

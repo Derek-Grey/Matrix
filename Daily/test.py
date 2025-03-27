@@ -11,6 +11,7 @@ from loguru import logger
 import plotly.graph_objects as go
 from pathlib import Path
 from functools import wraps
+import sys
 
 # === 新增装饰器定义 ===
 def log_function_call(func):
@@ -19,11 +20,8 @@ def log_function_call(func):
     def wrapper(*args, **kwargs):
         # 跳过密码参数的日志记录
         sanitized_kwargs = {k: '*****' if 'password' in k else v for k, v in kwargs.items()}
-        
-        logger.debug(f"Calling {func.__name__} with args: {args}, kwargs: {sanitized_kwargs}")
         start_time = time.time()
         result = func(*args, **kwargs)
-        logger.debug(f"{func.__name__} executed in {time.time()-start_time:.4f}s")
         return result
     return wrapper
 
@@ -89,6 +87,7 @@ def read_npq_file(file_path):
 
 def read_all_npq_files(data_root):
     """遍历时间段目录读取NPQ文件"""
+    start_time = time.time()  # 开始时间记录
     data_path = Path(data_root)
     all_dfs = []
     
@@ -104,16 +103,23 @@ def read_all_npq_files(data_root):
                 logger.warning(f"跳过{date_dir}，加载失败: {str(e)}")
                 continue
                 
+    end_time = time.time()  # 结束时间记录
+    logger.info(f"数据读取完成，耗时: {end_time - start_time:.4f}s")  # 输出耗时
+
     return pd.concat(all_dfs).sort_values('date')
 
 class Backtest:
-    def __init__(self, data_root, output_dir=Path('output')):
+    def __init__(self, data_root, output_dir=Path('output'), start_date=None, end_date=None):
         """初始化支持时间段回测""" 
+        start_time = time.time()
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 直接加载核心数据
+        # 直接加载核心数据并过滤时间范围
         full_df = read_all_npq_files(data_root)
+        if start_date and end_date:
+            full_df = full_df.loc[start_date:end_date]  # 新增时间过滤
+        
         self.stocks_matrix = full_df.pivot_table(
             index='date',
             columns='code',
@@ -144,15 +150,10 @@ class Backtest:
         self.trade_status_matrix = self.trade_status_matrix.reindex(index=max_index, columns=max_columns).fillna(0)
         self.score_matrix = self.score_matrix.reindex(index=max_index, columns=max_columns).fillna(0)
 
-        # 添加基础矩阵形状日志
-        logger.debug(f"基础矩阵形状 | 收益率矩阵: {self.stocks_matrix.shape}")
-        logger.debug(f"基础矩阵形状 | 涨跌停矩阵: {self.limit_matrix.shape}")
-        logger.debug(f"基础矩阵形状 | 风险警示矩阵: {self.risk_warning_matrix.shape}")
-        logger.debug(f"基础矩阵形状 | 交易状态矩阵: {self.trade_status_matrix.shape}")
-        logger.debug(f"基础矩阵形状 | 评分矩阵: {self.score_matrix.shape}")
-
-        # 将有效性矩阵生成移动到__init__方法内
         self._generate_validity_matrices()
+
+        end_time = time.time()  # 结束时间记录
+        logger.info(f"初始化完成，耗时: {end_time - start_time:.4f}s")  # 输出耗时
 
     # ====================== 数据加载方法 ======================
     def _load_matrix(self, attr_name, file_path):
@@ -232,23 +233,7 @@ class Backtest:
             self.trade_status_validity * self.limit_validity
         )
 
-
-    def _get_common_index(self):
-        """获取所有矩阵的交集时间索引"""
-        matrices = [
-            self.stocks_matrix,
-            self.limit_matrix,
-            self.risk_warning_matrix,
-            self.trade_status_matrix,
-            self.score_matrix
-        ]
-        common_index = matrices[0].index
-        for mat in matrices[1:]:
-            if not mat.empty:
-                common_index = common_index.intersection(mat.index)
-        return common_index
-
-    
+    # ====================== 策略方法 ======================
     @log_function_call
     def _update_positions(self, position_history, day, hold_count, rebalance_frequency):
         """更新持仓策略的持仓"""
@@ -331,7 +316,10 @@ class Backtest:
 
     def _process_results(self, position_history, start_time):
         """处理回测结果"""
-        position_history = position_history.dropna(subset=["hold_positions"])
+        # 创建副本避免链式赋值
+        position_history = position_history.dropna(subset=["hold_positions"]).copy()
+        
+        # 使用 .loc 确保安全赋值
         position_history.loc[:, 'hold_count'] = position_history['hold_positions'].apply(
             lambda x: len(x.split(',')) if pd.notna(x) else 0
         )
@@ -355,35 +343,6 @@ class Backtest:
         logger.info(f"平均持仓量: {stats['avg_holdings']:.1f}")
         
         return stats
-
-# 移除StrategyPlotter类
-
-    def _show_loaded_matrices(self):
-        """显示已加载矩阵的时间范围信息"""
-        matrix_info = [
-            ('收益率矩阵', self.stocks_matrix),
-            ('涨跌停矩阵', self.limit_matrix),
-            ('风险警示矩阵', self.risk_warning_matrix),
-            ('交易状态矩阵', self.trade_status_matrix),
-            ('评分矩阵', self.score_matrix)
-        ]
-        
-        logger.info("\n=== 加载矩阵时间范围 ===")
-        for name, mat in matrix_info:
-            if not mat.empty:
-                # 新增数据预览
-                logger.info(f"{name:.<15} 日期范围: {mat.index[0]} 至 {mat.index[-1]} 股票数量: {len(mat.columns)}")
-                logger.debug(f"{name}前3行数据:\n{mat.head(3).to_string()}")
-            else:
-                logger.warning(f"{name:.<15} 未成功加载数据")
-
-        # 新增完整结构输出
-        logger.debug("\n=== 矩阵结构预览 ===")
-        for name, mat in matrix_info:
-            if not mat.empty:
-                logger.debug(f"{name} shape: {mat.shape}\nColumns: {mat.columns.tolist()[:5]}...")
-            else:
-                logger.warning(f"{name:.<15} 未成功加载数据")
 
     def _initialize_position_history(self):
         """初始化持仓历史记录"""
@@ -420,7 +379,7 @@ def run_strategy(backtest, strategy_name, hold_count, rebalance_frequency):
         logger.error(f"{strategy_name}策略执行失败: {e}")
         return None
 
-def main(start_date="2010-08-02", end_date="2020-07-31", 
+def main(start_date="2015-08-02", end_date="2020-07-31", 
          hold_count=50, rebalance_frequency=1,
          data_directory='csv', output_directory='output'):
     """
@@ -437,6 +396,7 @@ def main(start_date="2010-08-02", end_date="2020-07-31",
     Returns:
         DataFrame: 固定持仓的回测结果
     """
+    total_start_time = time.time()  # 记录总开始时间
     try:
         logger.info(f"开始回测 - 时间范围: {start_date} 至 {end_date}")
         
@@ -457,14 +417,17 @@ def main(start_date="2010-08-02", end_date="2020-07-31",
     except Exception as e:
         logger.error(f"回测执行失败: {e}")
         raise
+    
+    total_end_time = time.time()  # 记录总结束时间
+    logger.info(f"总耗时: {total_end_time - total_start_time:.4f}s")  # 输出总耗时
 
 if __name__ == "__main__":
-    # 更新测试代码（仅运行固定策略）
+
     backtester = Backtest(r"D:\Data")
     
     fixed_results = run_strategy(
         backtester, 
         strategy_name="fixed",
-        hold_count=10,
-        rebalance_frequency=5
+        hold_count=50,
+        rebalance_frequency=1
     )
