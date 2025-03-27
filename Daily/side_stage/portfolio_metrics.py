@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import numpy as np
 import time
-from db_client import get_client_U
+from Utils.db_client import get_client_U
 from urllib.parse import quote_plus
 
 class DataChecker:

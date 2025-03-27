@@ -14,7 +14,7 @@ from functools import reduce
 import multiprocessing as mp
 from loguru import logger
 from settings import USELESS_INDUS, DB_U_MINUTE, END_MONTH
-from utils import trans_str_to_float64
+from Utils.utils import trans_str_to_float64
 from db_client import get_client_U, get_client
 from Utils.my_errors import LogExceptions
 from datetime import datetime

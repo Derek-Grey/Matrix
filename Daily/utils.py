@@ -55,5 +55,4 @@ def trans_str_to_float64(df: pd.DataFrame, exp_cols: list = None, trans_cols: li
 
 # 获取MongoDB客户端连接函数（只读）
 def get_client_U():
-    user, pwd = 'Tom', 'tom'
-    return pymongo.MongoClient(f"mongodb://{quote_plus(user)}:{quote_plus(pwd)}@localhost:27017/")
+    return pymongo.MongoClient(f"mongodb://@192.168.1.99:29900/")

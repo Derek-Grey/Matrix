@@ -1,11 +1,13 @@
+import sys
+sys.path.append('d:/Derek/Code/Matrix/Daily/Utils')
 import pandas as pd
 import os
 import plotly.graph_objects as go
 from plotly.offline import plot
 from pymongo import MongoClient
-from db_client import get_client_U
+from Utils.db_client import get_client_U
 import numpy as np
-import time as time_module  
+import time as time_module 
 
 client_u = get_client_U(m='r')  
 

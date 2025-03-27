@@ -130,3 +130,36 @@ def my_decimal_format(df, cols):
     for col in cols:
         df[col] = df[col].apply(lambda x: format(x, '.10%'))
     return df
+
+# 日志记录装饰器
+def log_function_call(func):
+    """函数调用日志装饰器"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        logger.info(f"开始执行 {func.__name__}...")
+        try:
+            result = func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"执行 {func.__name__} 时出错: {e}")
+            raise
+        end_time = time.time()
+        logger.info(f"执行 {func.__name__} 完成，耗时 {end_time - start_time:.2f} 秒")
+        return result
+    return wrapper
+
+# 异常处理装饰器
+def handle_exceptions(func):
+    """异常处理装饰器"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"执行 {func.__name__} 时出错: {e}")
+            raise
+    return wrapper
+    
+# 获取MongoDB客户端连接函数（只读）
+def get_client_U():
+    return pymongo.MongoClient(f"mongodb://@192.168.1.99:29900/")
