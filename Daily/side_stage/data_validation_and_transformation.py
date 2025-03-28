@@ -1,13 +1,13 @@
-import sys
-sys.path.append('d:/Derek/Code/Matrix/Daily/Utils')
-import pandas as pd
 import os
+import pandas as pd
+import numpy as np
+import time
 import plotly.graph_objects as go
 from plotly.offline import plot
-from pymongo import MongoClient
-from Utils.db_client import get_client_U
-import numpy as np
-import time as time_module 
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from Daily.Utils.db_client import get_client_U 
+from urllib.parse import quote_plus
 
 client_u = get_client_U(m='r')  
 
@@ -138,17 +138,17 @@ class PortfolioWeightAdjuster:
             codes: 股票代码数组，长度为n_codes
             change_limit: 单日调整上限
         """
-        self._start_time = time_module.time()
+        self._start_time = time.time()  
         self.weights = weights_array
         self.dates = pd.to_datetime(dates)
         self.codes = np.array(codes)
         self.change_limit = change_limit
         self.limit_checker = LimitPriceChecker()
-        print(f"初始化耗时: {time_module.time() - self._start_time:.2f}秒")
+        print(f"初始化耗时: {time.time() - self._start_time:.2f}秒")
 
     def validate_weights_sum(self) -> bool:
         """验证权重和"""
-        _start = time_module.time()
+        _start = time.time()  
         try:
             # 直接使用numpy计算每日权重和
             daily_sums = np.sum(self.weights, axis=1)
@@ -162,17 +162,17 @@ class PortfolioWeightAdjuster:
                 return False
                 
             print("所有日期的权重和验证通过")
-            print(f"权重验证耗时: {time_module.time() - _start:.2f}秒")
+            print(f"权重验证耗时: {time.time() - _start:.2f}秒")
             return True
             
         except Exception as e:
             print(f"权重验证出错：{e}")
-            print(f"权重验证耗时: {time_module.time() - _start:.2f}秒")
+            print(f"权重验证耗时: {time.time() - _start:.2f}秒")
             return False
 
     def adjust_weights_over_days(self):
         """调整权重"""
-        _start = time_module.time()
+        _start = time.time()  
         
         # 初始化结果数组
         n_dates, n_codes = self.weights.shape
@@ -180,7 +180,7 @@ class PortfolioWeightAdjuster:
         current_weights = self.weights[0].copy()  # 使用第一天的权重作为初始权重
         
         for day in range(n_dates):
-            _loop_start = time_module.time()
+            _loop_start = time.time()
             
             # 获取市场状态
             limit_status = self.limit_checker.get_limit_status(self.dates[day], self.codes)
@@ -207,16 +207,16 @@ class PortfolioWeightAdjuster:
             
             if day % 50 == 0:
                 print(f"处理第 {day+1}/{n_dates} 天, "
-                      f"单次耗时: {time_module.time() - _loop_start:.2f}秒")
+                      f"单次耗时: {time.time() - _loop_start:.2f}秒")
         
-        print(f"\n权重调整总耗时: {time_module.time() - _start:.2f}秒")
-        print(f"平均每天耗时: {(time_module.time() - _start)/n_dates:.2f}秒")
+        print(f"\n权重调整总耗时: {time.time() - _start:.2f}秒")
+        print(f"平均每天耗时: {(time.time() - _start)/n_dates:.2f}秒")
         
         return adjusted_weights
 
     def plot_adjusted_weight_sums(self, adjusted_weights):
         """绘制权重和变化图"""
-        _start = time_module.time()
+        _start = time.time()
         try:
             # 计算每日权重和
             adjusted_sums = np.sum(adjusted_weights, axis=1)
@@ -279,7 +279,7 @@ class PortfolioWeightAdjuster:
         except Exception as e:
             print(f"绘制图形时出错：{e}")
         finally:
-            print(f"绘图耗时: {time_module.time() - _start:.2f}秒")
+            print(f"绘图耗时: {time.time() - _start:.2f}秒")
 
     @staticmethod
     def load_data(data_source, source_type='csv'):
@@ -408,21 +408,16 @@ def main():
     adjuster = PortfolioWeightAdjuster(weights_array, dates, codes, change_limit)
     
     if adjuster.validate_weights_sum():
-        adjusted = adjuster.adjust_weights_over_days()
-        adjuster.plot_adjusted_weight_sums(adjusted)
-        # 在结果保存处增加必要信息
-        if adjuster.validate_weights_sum():
-            adjusted_weights = adjuster.adjust_weights_over_days()
-            adjuster.plot_adjusted_weight_sums(adjusted_weights)
-            
-            # 保存完整数据集
-            output_data = {
-                'weights': adjusted_weights,
-                'dates': dates,
-                'codes': codes
-            }
-            np.save('adjusted_weights.npy', output_data)
-            print(f"调整后的权重已保存到: adjusted_weights.npy")
+        adjusted = adjuster.adjust_weights_over_days()  
+        adjuster.plot_adjusted_weight_sums(adjusted)    
+
+        output_data = {
+            'weights': adjusted,  
+            'dates': dates,
+            'codes': codes
+        }
+        np.save('adjusted_weights.npy', output_data)
+        print(f"调整后的权重已保存到: adjusted_weights.npy")
 
 # 新增编程式调用接口
 def adjust_weights(source_type='csv', data_source=None, change_limit=0.05, output_path='adjusted_weights.npy'):

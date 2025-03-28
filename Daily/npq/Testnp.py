@@ -100,4 +100,4 @@ def main(data_root, start_date=None, end_date=None):
 
 if __name__ == "__main__":
     data_directory = r"D:\Data"  # 设置数据目录路径
-    main(data_directory, start_date="2010-01-01", end_date="2020-12-31")
+    main(data_directory, start_date="2015-01-05", end_date="2024-12-28")

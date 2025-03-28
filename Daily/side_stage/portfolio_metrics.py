@@ -1,11 +1,13 @@
-import sys
 import os
 import pandas as pd
 import numpy as np
 import time
-from Utils.db_client import get_client_U
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from Daily.Utils.db_client import get_client_U 
 from urllib.parse import quote_plus
 
+# 定义数据检查器
 class DataChecker:
     def __init__(self):
         self.trading_dates = self._fetch_trading_dates()

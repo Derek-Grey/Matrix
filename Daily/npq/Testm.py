@@ -77,8 +77,8 @@ def main():
     start_time = time.time()
 
     # 定义起始和结束日期
-    date_start = "2010-01-01"
-    date_end = "2020-12-31"
+    date_start = "2015-01-05"
+    date_end = "2024-12-28"
     data_folder = r"D:\Derek\Code\Matrix\csv"  # 使用原始字符串
 
     # 创建LoadData类的实例
