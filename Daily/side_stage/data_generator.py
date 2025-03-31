@@ -115,25 +115,26 @@ def create_daily_data(is_weight=True):
 
 if __name__ == "__main__":
     # 创建目录（如果不存在）
-    if not os.path.exists('csv'):
-        os.makedirs('csv')
+    output_dir = 'D:\\Derek\\Code\\Matrix\\Daily\\data'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     
     # 生成分钟频数据 - 权重
     minute_weight = create_minute_data(is_weight=True)
-    minute_weight.to_csv('csv/test_minute_weight.csv', index=False)
+    minute_weight.to_csv(os.path.join(output_dir, 'test_minute_weight.csv'), index=False)
     print(f"已保存分钟频权重数据，共 {len(minute_weight)} 行")
     
     # 生成分钟频数据 - 收益率
     minute_return = create_minute_data(is_weight=False)
-    minute_return.to_csv('csv/test_minute_return.csv', index=False)
+    minute_return.to_csv(os.path.join(output_dir, 'test_minute_return.csv'), index=False)
     print(f"已保存分钟频收益率数据，共 {len(minute_return)} 行")
     
     # 生成日频数据 - 权重
     daily_weight = create_daily_data(is_weight=True)
-    daily_weight.to_csv('csv/test_daily_weight.csv', index=False)
+    daily_weight.to_csv(os.path.join(output_dir, 'test_daily_weight.csv'), index=False)
     print(f"已保存日频权重数据，共 {len(daily_weight)} 行")
     
     # 生成日频数据 - 收益率
     daily_return = create_daily_data(is_weight=False)
-    daily_return.to_csv('csv/test_daily_return.csv', index=False)
-    print(f"已保存日频收益率数据，共 {len(daily_return)} 行") 
+    daily_return.to_csv(os.path.join(output_dir, 'test_daily_return.csv'), index=False)
+    print(f"已保存日频收益率数据，共 {len(daily_return)} 行")

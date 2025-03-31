@@ -63,7 +63,7 @@ def read_npq_file(file_path):
 
 def read_all_npq_files(data_root, start_date=None, end_date=None):
     """遍历时间段目录读取NPQ文件"""
-    start_time = time.time()  # 开始时间记录
+    load_start_time = time.time()  # 数据加载开始时间记录
     data_path = Path(data_root)
     all_dfs = []
     
@@ -84,8 +84,8 @@ def read_all_npq_files(data_root, start_date=None, end_date=None):
                 logger.warning(f"跳过{date_dir}，加载失败: {str(e)}")
                 continue
                 
-    end_time = time.time()  # 结束时间记录
-    logger.info(f"数据读取完成，耗时: {end_time - start_time:.4f}s")  # 输出耗时
+    load_end_time = time.time()  # 数据加载结束时间记录
+    logger.info(f"数据加载完成，耗时: {load_end_time - load_start_time:.4f}s")  # 输出数据加载耗时
 
     return pd.concat(all_dfs).sort_values('date')
 
@@ -94,10 +94,22 @@ def main(data_root, start_date=None, end_date=None):
     logger.info("开始读取NPQ文件...")
     try:
         df = read_all_npq_files(data_root, start_date, end_date)
+        
+        # 记录保存数据开始时间
+        save_start_time = time.time()
+        # 保存数据
+        output_path = OUTPUT_DIR / "trade_results.csv"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(output_path, index=False)
+        save_end_time = time.time()  # 记录保存数据结束时间
+
+        # 输出保存数据耗时
+        logger.info(f"数据保存完成，耗时: {save_end_time - save_start_time:.4f}s")
+
         print(df.head())  # 打印前几行数据
     except Exception as e:
         logger.error(f"读取NPQ文件失败: {e}")
 
 if __name__ == "__main__":
     data_directory = r"D:\Data"  # 设置数据目录路径
-    main(data_directory, start_date="2015-01-05", end_date="2024-12-28")
+    main(data_directory, start_date="2015-01-05", end_date="2024-12-31")

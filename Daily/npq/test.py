@@ -381,7 +381,7 @@ def run_strategy(backtest, strategy_name, hold_count, rebalance_frequency):
 
 def main(start_date="2015-08-02", end_date="2020-07-31", 
          hold_count=50, rebalance_frequency=1,
-         data_directory='csv', output_directory='output'):
+         data_directory='data', output_directory='output'):
     """
     主函数，执行回测策略
     

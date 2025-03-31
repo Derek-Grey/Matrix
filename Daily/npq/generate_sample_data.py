@@ -16,7 +16,7 @@ def read_trade_dates(csv_path):
         
         # 生成路径列（确保日期格式为YYYY-MM-DD）
         df['path'] = df['trade_date'].apply(
-            lambda x: str(Path(r"D:\Data") / f"{pd.to_datetime(x).strftime('%Y-%m-%d')}" / "1" / "11.npq")
+            lambda x: str(Path(r"D:\Data") / f"{pd.to_datetime(x).strftime('%Y-%m-%d')}" / "1" / "11.npq").replace('/', '\\')
         )
         return df
     

@@ -32,16 +32,38 @@ class LoadData:
     def get_chg_wind(self) -> pd.DataFrame:
         try:
             logger.debug('加载WIND的日频涨跌幅数据...')
+            
+            # 记录读取数据开始时间
+            read_start_time = time.time()
             df = pd.DataFrame(self.client_U.basic_wind.w_vol_price.find(
                 {"date": {"$gte": self.date_s, "$lte": self.date_e}},
                 {"_id": 0, "date": 1, "code": 1, "pct_chg": 1},
                 batch_size=1000000))
+            # 记录读取数据结束时间
+            read_end_time = time.time()
+
+            # 记录转换数据开始时间
+            trans_start_time = time.time()
             df = trans_str_to_float64(df, trans_cols=['pct_chg'])  # 转换数据类型
             df['date'] = pd.to_datetime(df['date'])  # 转期格式
             pivot_df = df.pivot_table(index='date', columns='code', values='pct_chg')  # 创建透视表
+            # 记录转换数据结束时间
+            trans_end_time = time.time()
 
+            # 记录保存数据开始时间
+            save_start_time = time.time()
             # 保存原始数据
             self.save_raw_data_to_csv(df, 'raw_wind_data.csv')
+            # 记录保存数据结束时间
+            save_end_time = time.time()
+
+            # 输出详细时间统计
+            read_time = read_end_time - read_start_time
+            trans_time = trans_end_time - trans_start_time
+            save_time = save_end_time - save_start_time
+            logger.info(f"读取数据时间: {read_time:.2f} 秒")
+            logger.info(f"转换数据时间: {trans_time:.2f} 秒")
+            logger.info(f"保存数据时间: {save_time:.2f} 秒")
 
             return pivot_df  # 返回透视表
         except Exception as e:
@@ -78,7 +100,7 @@ def main():
 
     # 定义起始和结束日期
     date_start = "2015-01-05"
-    date_end = "2024-12-28"
+    date_end = "2024-12-31"
     data_folder = r"D:\Derek\Code\Matrix\csv"  # 使用原始字符串
 
     # 创建LoadData类的实例
