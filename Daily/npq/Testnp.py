@@ -35,30 +35,10 @@ D1_11_numpy_dtype = np.dtype([
 def read_npq_file(file_path):
     """读取NPQ文件并返回DataFrame"""
     npq_data = np.fromfile(file_path, dtype=D1_11_numpy_dtype)
-    
-    # 构建列名
-    columns = [field for field in D1_11_numpy_dtype.fields if field != 'quote']
-    columns.extend(D1_11_dtype.fields)
-    
-    # 处理数据
-    rows = []
-    for item in npq_data:
-        row_data = {}
-        # 处理非quote字段
-        for field in D1_11_numpy_dtype.fields:
-            if field != 'quote':
-                row_data[field] = item[field]
-        # 处理quote字段
-        for quote_field in D1_11_dtype.fields:
-            value = item['quote'][quote_field]
-            if isinstance(value, bytes):
-                try: value = value.decode('utf-8')
-                except UnicodeDecodeError: value = None
-            row_data[quote_field] = value
-        rows.append(row_data)
+    quote = npq_data['quote']
+    df = pd.DataFrame(quote)  # 直接使用quote字段构建DataFrame
     
     # 只保留date, code, pct_chg字段
-    df = pd.DataFrame(rows, columns=columns)
     return df[['date', 'code', 'pct_chg']]
 
 def read_all_npq_files(data_root, start_date=None, end_date=None):

@@ -2,15 +2,10 @@ import os
 import pandas as pd
 import numpy as np
 import time
+from loguru import logger
+from pathlib import Path
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from Daily.Utils.db_client import get_client_U 
-from urllib.parse import quote_plus
-import re  # 新增正则表达式模块导入
-from loguru import logger
-import plotly.graph_objects as go
-from pathlib import Path
-from functools import wraps
 OUTPUT_DIR = Path(__file__).parent / 'output'  # 使用当前文件所在目录下的output文件夹
 
 # NPQ数据结构定义
@@ -311,17 +306,10 @@ class PortfolioMetrics:
         weights_df = pd.read_csv(self.weight_file)
         self._validate_weights(weights_df)
         
-        # 获取日期范围
-        date_range = weights_df['date'].unique()
-        
-        # 获取收益率数据
-        returns_df = self._fetch_returns(weights_df)
-        
-        # 转换为numpy数组
-        self.dates, self.codes, self.weights_arr, self.returns_arr = self._convert_to_arrays(weights_df, returns_df)
-        
-        # 设置数据频率标志
-        self.is_minute = 'time' in weights_df.columns
+        date_range = weights_df['date'].unique()# 获取日期范围
+        returns_df = self._fetch_returns(weights_df) # 获取收益率数据
+        self.dates, self.codes, self.weights_arr, self.returns_arr = self._convert_to_arrays(weights_df, returns_df)# 转换为numpy数组
+        self.is_minute = 'time' in weights_df.columns# 设置数据频率标志
         
         print(f"数据准备总耗时: {time.time() - start_time:.2f}秒\n")
 
@@ -413,35 +401,12 @@ class PortfolioMetrics:
         
         return dates, codes, weights_arr, returns_arr
 
-    def get_returns_for_weights(self):
-        """根据权重表中的日期和代码获取收益率数据"""
-        # 读取权重数据
-        weights_df = pd.read_csv(self.weight_file)
-        
-        # 获取日期和代码范围
-        date_range = weights_df['date'].unique()
-        code_list = weights_df['code'].unique()
-        
-        # 从NPQ文件中读取收益率数据
-        returns_df = read_returns_from_npq(data_directory, start_date=min(date_range), end_date=max(date_range))
-        
-        # 过滤出指定日期和代码的收益率数据
-        filtered_returns = returns_df[returns_df['date'].isin(date_range) & returns_df['code'].isin(code_list)]
-        
-        return filtered_returns
-
     def calculate_portfolio_metrics(self):
         """计算投资组合收益率和换手率"""
         start_time = time.time()
-        
-        # 计算组合收益率
-        portfolio_returns = np.sum(self.weights_arr * self.returns_arr, axis=1)
-
-        # 计算换手率
-        turnover = self._calculate_turnover(self.weights_arr, self.returns_arr)
-        
-        # 保存结果
-        self._save_results_array(self.dates, portfolio_returns, turnover)
+        portfolio_returns = np.sum(self.weights_arr * self.returns_arr, axis=1)  # 计算组合收益率
+        turnover = self._calculate_turnover(self.weights_arr, self.returns_arr)  # 计算换手率
+        self._save_results_array(self.dates, portfolio_returns, turnover)   # 保存结果
         
         print(f"计算指标总耗时: {time.time() - start_time:.2f}秒\n")
         return portfolio_returns, turnover
