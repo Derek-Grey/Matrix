@@ -7,7 +7,6 @@ from pathlib import Path
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 OUTPUT_DIR = Path(__file__).parent / 'output'  # 使用当前文件所在目录下的output文件夹
-
 # NPQ数据结构定义
 D1_11_dtype = np.dtype([
     ('date', 'S64'),
